@@ -8,7 +8,7 @@
 <title>AI Holdem Coach</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }
+<style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }
 </style>
 </head>
 <body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-slate-900 text-slate-100 font-sans">
@@ -64,8 +64,11 @@ Send me any poker hand - your hole cards, the board, your position - and I'll gi
 </footer>
 </div>
 
-<div id="history-view" class="hidden flex-1 overflow-y-auto p-4 space-y-3">
+<div id="history-view" class="hidden flex-1 overflow-y-auto">
+<div id="stats-section" class="p-4 border-b border-slate-800 space-y-3"></div>
+<div id="history-list" class="p-4 space-y-3">
 <p class="text-sm text-slate-500 text-center py-8">No hands yet. Start coaching.</p>
+</div>
 </div>
 </div>
 
@@ -73,11 +76,9 @@ Send me any poker hand - your hole cards, the board, your position - and I'll gi
 const supabaseUrl = 'https://gqzyvfjcfgmocknrnxob.supabase.co';
 const supabaseKey = 'sb_publishable_sdYei5FXQLjoe8PKL062Mw_oACuTYYj';
 const sb = supabase.createClient(supabaseUrl, supabaseKey);
-
 const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
 const logoutBtn = document.getElementById('logout-btn');
-
 function showApp() { authScreen.classList.add('hidden'); appScreen.classList.remove('hidden'); logoutBtn.classList.remove('hidden'); }
 function showAuth() { authScreen.classList.remove('hidden'); appScreen.classList.add('hidden'); logoutBtn.classList.add('hidden'); }
 function showError(m) { const e = document.getElementById('auth-error'); e.textContent = m; e.classList.remove('hidden'); setTimeout(() => e.classList.add('hidden'), 4000); }
@@ -89,7 +90,6 @@ const { data, error } = await sb.auth.signUp({ email, password });
 if (error) { showError(error.message); return; }
 if (data.session) showApp(); else showError('Account created. Check email to confirm.');
 });
-
 document.getElementById('signin-btn').addEventListener('click', async () => {
 const email = document.getElementById('email').value, password = document.getElementById('password').value;
 if (!email ||!password) { showError('Enter email and password.'); return; }
@@ -97,7 +97,6 @@ const { data, error } = await sb.auth.signInWithPassword({ email, password });
 if (error) { showError(error.message); return; }
 showApp();
 });
-
 logoutBtn.addEventListener('click', async () => { await sb.auth.signOut(); showAuth(); });
 sb.auth.getSession().then(({ data: { session } }) => { if (session) showApp(); });
 
@@ -106,20 +105,28 @@ const tabHistory = document.getElementById('tab-history');
 const coachView = document.getElementById('coach-view');
 const historyView = document.getElementById('history-view');
 
-tabCoach.addEventListener('click', async () => {
+tabCoach.addEventListener('click', () => {
 tabCoach.className = tabCoach.className.replace('tab-inactive', 'tab-active');
 tabHistory.className = tabHistory.className.replace('tab-active', 'tab-inactive');
-coachView.classList.remove('hidden');
-historyView.classList.add('hidden');
+coachView.classList.remove('hidden'); historyView.classList.add('hidden');
 });
-
 tabHistory.addEventListener('click', async () => {
 tabHistory.className = tabHistory.className.replace('tab-inactive', 'tab-active');
 tabCoach.className = tabCoach.className.replace('tab-active', 'tab-inactive');
-coachView.classList.add('hidden');
-historyView.classList.remove('hidden');
+coachView.classList.add('hidden'); historyView.classList.remove('hidden');
 loadHistory();
 });
+
+function tierClass(t) {
+if (!t) return 'tier-speculative';
+const l = t.toLowerCase();
+if (l === 'premium') return 'tier-premium';
+if (l === 'strong') return 'tier-strong';
+if (l === 'playable') return 'tier-playable';
+if (l === 'speculative') return 'tier-speculative';
+if (l === 'trash') return 'tier-trash';
+return 'tier-speculative';
+}
 
 async function loadHistory() {
 const { data: { session } } = await sb.auth.getSession();
@@ -128,18 +135,54 @@ try {
 const res = await fetch('/api/history', { headers: { 'Authorization': 'Bearer ' + session.access_token } });
 const data = await res.json();
 const entries = data.history || [];
+const statsEl = document.getElementById('stats-section');
+const listEl = document.getElementById('history-list');
 if (entries.length === 0) {
-historyView.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No hands yet. Start coaching.</p>';
+statsEl.innerHTML = '';
+listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No hands yet. Start coaching.</p>';
 return;
 }
-historyView.innerHTML = entries.map(e => `
+const tiers = {}, positions = {}, hands = {};
+entries.forEach(e => {
+if (e.tier) { const k = e.tier.toLowerCase(); tiers[k] = (tiers[k] || 0) + 1; }
+if (e.position) { positions[e.position] = (positions[e.position] || 0) + 1; }
+if (e.hand) { hands[e.hand] = (hands[e.hand] || 0) + 1; }
+});
+const topHand = Object.entries(hands).sort((a, b) => b[1] - a[1])[0];
+const topTier = Object.entries(tiers).sort((a, b) => b[1] - a[1])[0];
+const posLabels = Object.entries(positions).sort((a, b) => b[1] - a[1]).slice(0, 3).map(p => p[0]).join(', ');
+
+statsEl.innerHTML = `
+<h3 class="text-sm font-semibold text-slate-300">Your Stats</h3>
+<div class="grid grid-cols-3 gap-3">
+<div class="bg-slate-800 rounded-lg p-3 text-center">
+<p class="text-lg font-bold text-indigo-400">${entries.length}</p>
+<p class="text-xs text-slate-500">Hands</p>
+</div>
+<div class="bg-slate-800 rounded-lg p-3 text-center">
+<p class="text-lg font-bold text-emerald-400">${topHand? topHand[0]: '-'}</p>
+<p class="text-xs text-slate-500">Most studied</p>
+</div>
+<div class="bg-slate-800 rounded-lg p-3 text-center">
+<p class="text-lg font-bold text-amber-400 capitalize">${topTier? topTier[0]: '-'}</p>
+<p class="text-xs text-slate-500">Top tier</p>
+</div>
+</div>
+${posLabels? `<p class="text-xs text-slate-500 mt-1">Positions: ${posLabels}</p>`: ''}
+`;
+
+listEl.innerHTML = entries.map(e => `
 <div class="bg-slate-800 rounded-xl p-4 space-y-2">
-<p class="text-xs text-slate-500">${new Date(e.created_at).toLocaleString()}</p>
-<p class="text-sm text-indigo-400 font-medium">${e.input}</p>
+<div class="flex items-center gap-2">
+${e.hand? `<span class="text-sm font-bold text-indigo-400">${e.hand}</span>`: ''}
+${e.tier? `<span class="text-xs font-semibold px-2 py-0.5 rounded ${tierClass(e.tier)} text-white capitalize">${e.tier}</span>`: ''}
+${e.position? `<span class="text-xs text-slate-500">${e.position}</span>`: ''}
+<span class="text-xs text-slate-600 ml-auto">${new Date(e.created_at).toLocaleDateString()}</span>
+</div>
 <p class="text-sm text-slate-300">${e.reply}</p>
 </div>
 `).join('');
-} catch { historyView.innerHTML = '<p class="text-sm text-red-400 text-center py-8">Could not load history.</p>'; }
+} catch { document.getElementById('history-list').innerHTML = '<p class="text-sm text-red-400 text-center py-8">Could not load history.</p>'; }
 }
 
 const chatbox = document.getElementById('chatbox');

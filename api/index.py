@@ -132,14 +132,41 @@ async def chat_endpoint(req: Request):
 				user_id = resp.user.id
 		except Exception:
 			pass
-	reply = coach(user_input)
+	messages = [system_msg, {"role": "user", "content": user_input}]
+	response = groq_client.chat.completions.create(
+		model="openai/gpt-oss-120b",
+		messages=messages,
+		tools=tools,
+		tool_choice="auto",
+	)
+	msg = response.choices[0].message
+	parsed = {}
+	if msg.tool_calls:
+		messages.append(msg)
+		for tc in msg.tool_calls:
+			fn = available.get(tc.function.name)
+			args = json.loads(tc.function.arguments)
+			result = fn(**args) if fn else "Not found."
+			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
+			try:
+				parsed = json.loads(result)
+			except (TypeError, json.JSONDecodeError):
+				pass
+		second = groq_client.chat.completions.create(
+				model="openai/gpt-oss-120b", messages=messages
+			)
+		reply = second.choices[0].message.content
+	else:
+		reply = msg.content
 	if user_id:
 		try:
-			supabase.table("messages").insert({
-				"user_id": user_id,
-				"input": user_input,
-				"reply": reply
-			}).execute()
+			row = {"user_id": user_id, "input": user_input, "reply": reply}
+			if parsed.get("hand"): row["hand"] = parsed["hand"]
+			if parsed.get("tier"): row["tier"] = parsed["tier"]
+			if parsed.get("position"): row["position"] = parsed["position"]
+			if parsed.get("action"): row["action"] = parsed["action"]
+			if parsed.get("hand_rank"): row["hand"] = parsed["hand_rank"]
+			supabase.table("messages").insert(row).execute()
 		except Exception:
 			pass
 	return {"reply": reply}
