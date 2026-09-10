@@ -165,6 +165,7 @@ async def chat_endpoint(req: Request):
 	reply, parsed = run_pipeline(user_input, mode, user_id)
 	if user_id:
 		try:
+			session = get_last_hand(user_id)
 			row = {"user_id": user_id, "input": user_input, "reply": reply}
 			if parsed.get("hand"): row["hand"] = parsed["hand"]
 			if parsed.get("tier"): row["tier"] = parsed["tier"]
@@ -172,8 +173,16 @@ async def chat_endpoint(req: Request):
 			if parsed.get("action"): row["player_action"] = parsed["action"]
 			if parsed.get("result"): row["result"] = parsed["result"]
 			if parsed.get("amount"): row["amount"] = parsed["amount"]
-			if parsed.get("hand_rank"): row["hand"] = parsed["hand_rank"]
-			supabase.table("messages").insert(row).execute()
+			if session and session.get("hand") and parsed.get("hand_rank"):
+				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
+				if last.data and last.data[0]:
+					update = {"reply": reply}
+					if parsed.get("hand_rank"): update["hand_rank"] = parsed["hand_rank"]
+					supabase.table("messages").update(update).eq("id", last.data[0]["id"]).execute()
+				else:
+					supabase.table("messages").insert(row).execute()
+			else:
+				supabase.table("messages").insert(row).execute()
 		except Exception:
 			pass
 	return {"reply": reply, "parsed": parsed}
