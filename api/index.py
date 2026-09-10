@@ -102,6 +102,22 @@ def coach(user_input):
 class ChatRequest(BaseModel):
 	message: str
 
+@app.get("/api/history")
+async def history_endpoint(req: Request):
+	auth_header = req.headers.get("authorization", "")
+	if not auth_header.startswith("Bearer "):
+		return {"error": "unauthorized"}
+	token = auth_header[7:]
+	try:
+		resp = supabase.auth.get_user(token)
+		if not resp or not resp.user:
+			return {"error": "unauthorized"}
+		user_id = resp.user.id
+	except Exception:
+		return {"error": "unauthorized"}
+	result = supabase.table("messages").select("input, reply, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
+	return {"history": result.data}
+
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
 	body = await req.json()
