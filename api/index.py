@@ -132,8 +132,10 @@ def run_pipeline(user_input, mode, user_id=None):
     session = None
     if user_id:
         session = get_session_context(user_id)
+
     system_msg = build_system(mode, session)
     messages = [system_msg, {"role": "user", "content": user_input}]
+
     try:
         response = groq_client.chat.completions.create(
             model="openai/gpt-oss-120b",
@@ -155,88 +157,43 @@ def run_pipeline(user_input, mode, user_id=None):
                 result = fn(**args) if fn else "Not found."
             except Exception as e:
                 result = json.dumps({"error": f"Tool failed: {str(e)}. Try cards like Ah Kd or Jh 4d."})
-            messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
+
             if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
                 try:
                     parsed = json.loads(result)
                 except Exception:
                     pass
 
-    messages[0] = {"role": "system", "content": "Respond to the user based on the tool results. Be brief and friendly. No tool calls."}
-    try:
-        second = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=messages,
-            tool_choice="none",
-        )
-        return second.choices[0].message.content, parsed, session
-    except Exception as e:
-        return f"AI response error: {str(e)}", parsed, session
+            result_text = ""
+            if parsed.get("hand"):
+                result_text += f"Hand: {parsed['hand']}. "
+            if parsed.get("tier"):
+                result_text += f"Tier: {parsed['tier']}. "
+            if parsed.get("position"):
+                result_text += f"Position: {parsed['position']}. "
+            if parsed.get("action"):
+                result_text += f"Action: {parsed['action']}. "
+            if parsed.get("hand_rank"):
+                result_text += f"Hand rank: {parsed['hand_rank']}. Score: {parsed.get('score', '')}. "
+            if parsed.get("result"):
+                result_text += f"Result: {parsed['result']}. "
+            if parsed.get("amount"):
+                result_text += f"Amount: {parsed['amount']}. "
+            if not result_text:
+                result_text = json.dumps(parsed)
+
+            clean = [
+                {
+                    "role": "system",
+                    "content": "Based on this data, respond to the player briefly and friendly. No tool calls." if mode == "coach" else "Based on this data, give a one-line log summary. No advice, no tool calls."
+                },
+                {"role": "user", "content": user_input},
+                {"role": "assistant", "content": result_text.strip()},
+            ]
+            try:
+                second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
+                return second.choices[0].message.content, parsed, session
+            except Exception as e:
+                return f"AI response error: {str(e)}", parsed, session
 
     return msg.content, parsed, session
-@ app.post("/api/chat")
-async def chat_endpoint(req: Request):
-	if not startup_ok:
-		return {"reply": f"Startup failed: {startup_error}"}
-	try:
-		body = await req.json()
-	except Exception:
-		return {"reply": "Could not read your message."}
-	user_input = body.get("message", "")
-	mode = body.get("mode", "coach")
-	auth_header = req.headers.get("authorization", "")
-	user_id = None
-	if auth_header.startswith("Bearer "):
-		token = auth_header[7:]
-		try:
-			resp = supabase.auth.get_user(token)
-			if resp and resp.user:
-				user_id = resp.user.id
-		except Exception:
-			pass
-	reply, parsed, session = run_pipeline(user_input, mode, user_id)
-	if user_id:
-		try:
-			if session and session.get("hand") and parsed.get("hand_rank"):
-				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
-				if last.data and last.data[0]:
-					supabase.table("messages").update({"reply": reply}).eq("id", last.data[0]["id"]).execute()
-				else:
-					supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
-			else:
-				supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
-		except Exception as e:
-			reply += f" (log error: {str(e)})"
-	return {"reply": reply, "parsed": parsed}
-
-@app.post("/api/result")
-async def result_endpoint(req: Request):
-	try:
-		body = await req.json()
-		auth_header = req.headers.get("authorization", "")
-		if not auth_header.startswith("Bearer "):
-			return {"error": "unauthorized"}
-		token = auth_header[7:]
-		resp = supabase.auth.get_user(token)
-		if not resp or not resp.user:
-			return {"error": "unauthorized"}
-		supabase.table("messages").update({"result": body.get("result"), "amount": body.get("amount")}).eq("id", body.get("id")).execute()
-		return {"ok": True}
-	except Exception as e:
-		return {"error": str(e)}
-
-@app.get("/api/history")
-async def history_endpoint(req: Request):
-	try:
-		auth_header = req.headers.get("authorization", "")
-		if not auth_header.startswith("Bearer "):
-			return {"error": "unauthorized"}
-		token = auth_header[7:]
-		resp = supabase.auth.get_user(token)
-		if not resp or not resp.user:
-			return {"error": "unauthorized"}
-		user_id = resp.user.id
-		result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
-		return {"history": result.data}
-	except Exception as e:
-		return {"error": str(e)}
