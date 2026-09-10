@@ -129,38 +129,51 @@ def build_system(mode, session=None):
 		base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
 	return {"role": "system", "content": base}
 def run_pipeline(user_input, mode, user_id=None):
-	session = None
-	if user_id:
-		session = get_session_context(user_id)
-	system_msg = build_system(mode, session)
-	messages = [system_msg, {"role": "user", "content": user_input}]
-	try:
-		response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
-	except Exception as e:
-		return f"AI error: {str(e)}", {}, session
-	msg = response.choices[0].message
-	parsed = {}
-	if msg.tool_calls:
-		messages.append(msg)
-		for tc in msg.tool_calls:
-			fn = available.get(tc.function.name)
-			try:
-				args = json.loads(tc.function.arguments)
-				result = fn(**args) if fn else "Not found."
-			except Exception as e:
-				result = json.dumps({"error": f"Tool failed: {str(e)}. Try cards like Ah Kd or Jh 4d."})
-			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
-			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
-				try:
-					parsed = json.loads(result)
-				except Exception:
-					pass
-		try:
-			second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tool_choice="none")
-			return second.choices[0].message.content, parsed, session
-		except Exception as e:
-			return f"AI response error: {str(e)}", parsed, session
-	return msg.content, parsed, session
+    session = None
+    if user_id:
+        session = get_session_context(user_id)
+    system_msg = build_system(mode, session)
+    messages = [system_msg, {"role": "user", "content": user_input}]
+    try:
+        response = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+        )
+    except Exception as e:
+        return f"AI error: {str(e)}", {}, session
+
+    msg = response.choices[0].message
+    parsed = {}
+    if msg.tool_calls:
+        messages.append(msg)
+        for tc in msg.tool_calls:
+            fn = available.get(tc.function.name)
+            try:
+                args = json.loads(tc.function.arguments)
+                result = fn(**args) if fn else "Not found."
+            except Exception as e:
+                result = json.dumps({"error": f"Tool failed: {str(e)}. Try cards like Ah Kd or Jh 4d."})
+            messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
+            if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
+                try:
+                    parsed = json.loads(result)
+                except Exception:
+                    pass
+
+    messages[0] = {"role": "system", "content": "Respond to the user based on the tool results. Be brief and friendly. No tool calls."}
+    try:
+        second = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages,
+            tool_choice="none",
+        )
+        return second.choices[0].message.content, parsed, session
+    except Exception as e:
+        return f"AI response error: {str(e)}", parsed, session
+
+    return msg.content, parsed, session
 @ app.post("/api/chat")
 async def chat_endpoint(req: Request):
 	if not startup_ok:
