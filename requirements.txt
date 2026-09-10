@@ -1,0 +1,7 @@
+fastapi
+groq
+treys
+pydantic.gitignore:
+
+__pycache__/
+*.py[cod].DS_Store
