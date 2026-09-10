@@ -14,10 +14,16 @@ allow_credentials=True,
 allow_methods=["*"],
 allow_headers=["*"],)
 
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
-os.environ.get("SUPABASE_SERVICE_KEY"))
-evaluator = Evaluator()
+try:
+	groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+	supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
+	os.environ.get("SUPABASE_SERVICE_KEY"))
+	evaluator = Evaluator()
+	startup_ok = True
+	startup_error = ""
+except Exception as e:
+	startup_ok = False
+	startup_error = str(e)
 
 def evaluate_poker_hand(hero_cards, board_cards):
 	hero = [Card.new(c) for c in hero_cards]
@@ -70,7 +76,7 @@ def log_hand(hand, position=None, action=None, result=None, amount=None):
 			c1 = hand[0] + "h"
 			c2 = hand[1] + "d"
 			tier_num = get_hand_tier(to_canonical(c1, c2))
-		except:
+		except Exception:
 			pass
 	tier_name = TIER_NAMES.get(tier_num, None) if tier_num else None
 	return json.dumps({"hand": hand, "tier": tier_name, "position": position, "action": action, "result": result, "amount": amount})
@@ -88,19 +94,20 @@ def get_session_context(user_id):
 		result = supabase.table("messages").select("input, hand, position").eq("user_id", user_id).order("created_at", desc=True).limit(10).execute()
 		if not result.data:
 			return None
-		messages = list(reversed(result.data))
+		msgs = list(reversed(result.data))
 		anchor = None
 		streets = []
-		for msg in messages:
-			if msg.get("hand") and not anchor:
-				anchor = msg
+		for m in msgs:
+			if m.get("hand") and not anchor:
+				anchor = m
 			elif anchor:
-				streets.append(msg.get("input", ""))
+				streets.append(m.get("input", ""))
 		if anchor:
-			return {"id_query": None, "hand": anchor["hand"], "position": anchor.get("position", ""), "prev_input": anchor.get("input", ""), "streets": streets}
-	except:
+			return {"hand": anchor["hand"], "position": anchor.get("position", ""), "prev_input": anchor.get("input", ""), "streets": streets}
+	except Exception:
 		pass
 	return None
+
 def build_system(mode, session=None):
 	if mode == "track":
 		base = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."
@@ -121,33 +128,47 @@ def build_system(mode, session=None):
 					base += f" they then said: '{s}'."
 		base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
 	return {"role": "system", "content": base}
-
 def run_pipeline(user_input, mode, user_id=None):
-	session = get_session_context(user_id) if user_id else None
+	session = None
+	if user_id:
+		session = get_session_context(user_id)
 	system_msg = build_system(mode, session)
 	messages = [system_msg, {"role": "user", "content": user_input}]
-	response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
+	try:
+		response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
+	except Exception as e:
+		return f"AI error: {str(e)}", {}, session
 	msg = response.choices[0].message
 	parsed = {}
 	if msg.tool_calls:
 		messages.append(msg)
 		for tc in msg.tool_calls:
 			fn = available.get(tc.function.name)
-			args = json.loads(tc.function.arguments)
 			try:
+				args = json.loads(tc.function.arguments)
 				result = fn(**args) if fn else "Not found."
-			except:
-				result = json.dumps({"error": "could not evaluate - try describing cards more specifically, like Ah Kd or Jh 4d"})
+			except Exception as e:
+				result = json.dumps({"error": f"Tool failed: {str(e)}. Try cards like Ah Kd or Jh 4d."})
 			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
 			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
-				try: parsed = json.loads(result)
-				except: pass
-		second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
-		return second.choices[0].message.content, parsed, session
+				try:
+					parsed = json.loads(result)
+				except Exception:
+					pass
+		try:
+			second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
+			return second.choices[0].message.content, parsed, session
+		except Exception as e:
+			return f"AI response error: {str(e)}", parsed, session
 	return msg.content, parsed, session
-@app.post("/api/chat")
+@ app.post("/api/chat")
 async def chat_endpoint(req: Request):
-	body = await req.json()
+	if not startup_ok:
+		return {"reply": f"Startup failed: {startup_error}"}
+	try:
+		body = await req.json()
+	except Exception:
+		return {"reply": "Could not read your message."}
 	user_input = body.get("message", "")
 	mode = body.get("mode", "coach")
 	auth_header = req.headers.get("authorization", "")
@@ -158,7 +179,7 @@ async def chat_endpoint(req: Request):
 			resp = supabase.auth.get_user(token)
 			if resp and resp.user:
 				user_id = resp.user.id
-		except:
+		except Exception:
 			pass
 	reply, parsed, session = run_pipeline(user_input, mode, user_id)
 	if user_id:
@@ -171,55 +192,38 @@ async def chat_endpoint(req: Request):
 					supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
 			else:
 				supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
-		except:
-			pass
+		except Exception as e:
+			reply += f" (log error: {str(e)})"
 	return {"reply": reply, "parsed": parsed}
 
 @app.post("/api/result")
 async def result_endpoint(req: Request):
-	body = await req.json()
-	auth_header = req.headers.get("authorization", "")
-	if not auth_header.startswith("Bearer "):
-		return {"error": "unauthorized"}
-	token = auth_header[7:]
 	try:
+		body = await req.json()
+		auth_header = req.headers.get("authorization", "")
+		if not auth_header.startswith("Bearer "):
+			return {"error": "unauthorized"}
+		token = auth_header[7:]
 		resp = supabase.auth.get_user(token)
 		if not resp or not resp.user:
 			return {"error": "unauthorized"}
-	except:
-		return {"error": "unauthorized"}
-	try:
 		supabase.table("messages").update({"result": body.get("result"), "amount": body.get("amount")}).eq("id", body.get("id")).execute()
 		return {"ok": True}
-	except:
-		return {"error": "could not save"}
+	except Exception as e:
+		return {"error": str(e)}
 
 @app.get("/api/history")
 async def history_endpoint(req: Request):
-	body = await req.json()
-	user_input = body.get("message", "")
-	mode = body.get("mode", "coach")
-	auth_header = req.headers.get("authorization", "")
-	user_id = None
-	if auth_header.startswith("Bearer "):
+	try:
+		auth_header = req.headers.get("authorization", "")
+		if not auth_header.startswith("Bearer "):
+			return {"error": "unauthorized"}
 		token = auth_header[7:]
-		try:
-			resp = supabase.auth.get_user(token)
-			if resp and resp.user:
-				user_id = resp.user.id
-		except Exception:
-			pass
-	reply, parsed, session = run_pipeline(user_input, mode, user_id)
-	if user_id:
-		try:
-			if session and session.get("hand") and parsed.get("hand_rank"):
-				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
-				if last.data and last.data[0]:
-					supabase.table("messages").update({"reply": reply}).eq("id", last.data[0]["id"]).execute()
-				else:
-					supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
-			else:
-				supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
-		except Exception:
-			pass
-	return {"reply": reply, "parsed": parsed}
+		resp = supabase.auth.get_user(token)
+		if not resp or not resp.user:
+			return {"error": "unauthorized"}
+		user_id = resp.user.id
+		result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
+		return {"history": result.data}
+	except Exception as e:
+		return {"error": str(e)}
