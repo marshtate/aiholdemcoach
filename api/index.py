@@ -156,7 +156,7 @@ def run_pipeline(user_input, mode, user_id=None):
 				except Exception:
 					pass
 		try:
-			second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
+			second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tool_choice="none")
 			return second.choices[0].message.content, parsed, session
 		except Exception as e:
 			return f"AI response error: {str(e)}", parsed, session
