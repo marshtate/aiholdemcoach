@@ -85,31 +85,45 @@ tools = [
 available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand}
 def get_last_hand(user_id):
 	try:
-		result = supabase.table("messages").select("hand, position, input").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
-		if result.data and result.data[0].get("hand"):
-			return result.data[0]
+		result = supabase.table("messages").select("input, hand, position").eq("user_id", user_id).order("created_at", desc=True).limit(10).execute()
+		if not result.data:
+			return None
+		messages = list(reversed(result.data))
+		anchor = None
+		streets = []
+		for msg in messages:
+			if msg.get("hand") and not anchor:
+				anchor = msg
+			elif anchor:
+				streets.append(msg.get("input", ""))
+		if anchor:
+			return {"hand": anchor["hand"], "position": anchor.get("position", ""), "prev_input": anchor.get("input", ""), "streets": streets}
 	except Exception:
 		pass
 	return None
 
-def build_system(mode, last_hand=None):
+def build_system(mode, session=None):
 	if mode == "track":
 		base = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."
 	else:
 		base = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand to compute real math. When a player describes ONLY hole cards with no board, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."
-	if last_hand and last_hand.get("hand"):
-		hand = last_hand["hand"]
-		pos = last_hand.get("position", "")
-		prev = last_hand.get("input", "")
-		base += f" CONTEXT - this player's last message was '{prev}', which was parsed as hand {hand}"
-		if pos:
-			base += f" from {pos}"
-		base += ". If their new message seems like a continuation - a board, flop, turn, river, result - treat it as the SAME hand. If they describe a board, use evaluate_poker_hand with their hole cards from that hand plus the board they're describing."
+	if session and session.get("hand"):
+		hand = session["hand"]
+		pos = session.get("position", "")
+		prev = session.get("prev_input", "")
+		streets = session.get("streets", [])
+		base += f" CONTEXT - this player is holding {hand}"
+		if pos: base += f" from {pos}"
+		base += f". their original message was '{prev}'."
+		if streets:
+			for s in streets:
+				if s: base += f" they then said: '{s}'."
+		base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
 	return {"role": "system", "content": base}
 
 def run_pipeline(user_input, mode, user_id=None):
-	last_hand = get_last_hand(user_id) if user_id else None
-	system_msg = build_system(mode, last_hand)
+	session = get_last_hand(user_id) if user_id else None
+	system_msg = build_system(mode, session)
 	messages = [system_msg, {"role": "user", "content": user_input}]
 	response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
 	msg = response.choices[0].message
