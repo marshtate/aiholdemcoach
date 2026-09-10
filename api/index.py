@@ -134,7 +134,10 @@ def run_pipeline(user_input, mode, user_id=None):
 		for tc in msg.tool_calls:
 			fn = available.get(tc.function.name)
 			args = json.loads(tc.function.arguments)
-			result = fn(**args) if fn else "Not found."
+			try:
+				result = fn(**args) if fn else "Not found."
+			except:
+				result = json.dumps({"error": "could not evaluate - try describing cards more specifically, like Ah Kd or Jh 4d"})
 			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
 			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
 				try: parsed = json.loads(result)
