@@ -101,6 +101,6 @@ def coach(user_input):
 class ChatRequest(BaseModel):
 	message: str
 
-@app.post("/chat")
+@app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
 	return {"reply": coach(req.message)}
