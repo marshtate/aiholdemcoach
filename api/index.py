@@ -17,7 +17,7 @@ allow_headers=["*"],)
 
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
-os.environ.get("SUPABASE_KEY"))
+os.environ.get("SUPABASE_SERVICE_KEY"))
 evaluator = Evaluator()
 
 def evaluate_poker_hand(hero_cards, board_cards):
