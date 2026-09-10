@@ -211,14 +211,26 @@ async def chat_endpoint(req: Request):
 	reply, parsed, session = run_pipeline(user_input, mode, user_id)
 	if user_id:
 		try:
+			row_hand = parsed.get("hand")
+			if not row_hand and session and session.get("hand"):
+				row_hand = session["hand"]
+			row = {"user_id": user_id, "input": user_input, "reply": reply, "hand": row_hand, "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}
+			if parsed.get("hand_rank"):
+				row["hand_rank"] = parsed["hand_rank"]
+			row["score"] = parsed.get("score")
 			if session and session.get("hand") and parsed.get("hand_rank"):
 				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
 				if last.data and last.data[0]:
-					supabase.table("messages").update({"reply": reply}).eq("id", last.data[0]["id"]).execute()
+					update = {"reply": reply}
+					if parsed.get("hand_rank"):
+						update["hand_rank"] = parsed["hand_rank"]
+					if parsed.get("score"):
+						update["score"] = parsed["score"]
+					supabase.table("messages").update(update).eq("id", last.data[0]["id"]).execute()
 				else:
-					supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
+					supabase.table("messages").insert(row).execute()
 			else:
-				supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
+				supabase.table("messages").insert(row).execute()
 		except Exception as e:
 			reply += f" (log error: {str(e)})"
 	return {"reply": reply, "parsed": parsed}
