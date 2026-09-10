@@ -2,3 +2,4 @@ fastapi
 groq
 treys
 pydantic
+supabase

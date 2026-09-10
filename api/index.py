@@ -1,10 +1,11 @@
 import os
 import json
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import Groq
 from treys import Card, Evaluator
+from supabase import create_client, Client
 
 app = FastAPI()
 
@@ -14,7 +15,9 @@ allow_credentials=True,
 allow_methods=["*"],
 allow_headers=["*"],)
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
+os.environ.get("SUPABASE_KEY"))
 evaluator = Evaluator()
 
 def evaluate_poker_hand(hero_cards, board_cards):
@@ -27,7 +30,6 @@ def evaluate_poker_hand(hero_cards, board_cards):
 
 RANKS = "23456789TJQKA"
 RANK_VALUES = {r: i for i, r in enumerate(RANKS, start=2)}
-
 TIER_1 = {"AA", "KK", "QQ", "JJ", "AKs", "AKo"}
 TIER_2 = {"TT", "99", "88", "AQs", "AJs", "ATs", "KQs", "KJs", "AQo"}
 TIER_3 = {"77", "66", "A9s", "A8s", "A7s", "A6s", "A5s", "A4s", "A3s", "A2s", "KTs", "QJs", "QTs", "JTs", "T9s", "98s", "87s", "AJo", "KQo", "KJo"}
@@ -53,17 +55,21 @@ def to_canonical(card1, card2):
 		return f"{r1}{r2}o"
 
 def get_hand_tier(hand):
-	if hand in TIER_1: return 1
-	elif hand in TIER_2: return 2
-	elif hand in TIER_3: return 3
-	elif hand in TIER_4: return 4
+	if hand in TIER_1:
+		return 1
+	elif hand in TIER_2:
+		return 2
+	elif hand in TIER_3:
+		return 3
+	elif hand in TIER_4:
+		return 4
 	return 5
 
 def preflop_advice(card1, card2, position="BTN"):
 	hand = to_canonical(card1, card2)
 	tier = get_hand_tier(hand)
 	pos = position.upper()
-	open_thresholds = {"UTG": [1,2], "MP": [1,2], "CO": [1,2,3], "BTN": [1,2,3,4], "SB": [1,2,3,4]}
+	open_thresholds = {"UTG": [1, 2], "MP": [1, 2], "CO": [1, 2, 3], "BTN": [1, 2, 3, 4], "SB": [1, 2, 3, 4]}
 	if pos == "BB":
 		action = "Check if unraised, defend vs one open depending on pot odds"
 	elif tier in open_thresholds.get(pos, []):
@@ -73,34 +79,51 @@ def preflop_advice(card1, card2, position="BTN"):
 	return json.dumps({"hand": hand, "tier": TIER_NAMES[tier], "position": pos, "action": action})
 
 tools = [
-{"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and community board cards. Use when the player provides a board.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}, "description": "Two hole cards, e.g. Ah and Kd"}, "board_cards": {"type": "array", "items": {"type": "string"}, "description": "Three to five community cards"}}, "required": ["hero_cards", "board_cards"]}}},
-{"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards. Use when no board is provided.", "parameters": {"type": "object", "properties": {"card1": {"type": "string", "description": "First hole card, e.g. Ah"}, "card2": {"type": "string", "description": "Second hole card, e.g. Kd"}, "position": {"type": "string", "description": "Position: UTG, MP, CO, BTN, SB, BB. Default BTN."}}, "required": ["card1", "card2"]}}},
+{"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards. Use when the player provides a board.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
+{"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards. Use when no board is provided.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB. Default BTN."}}, "required": ["card1", "card2"]}}},
 ]
 
 available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice}
-
-system_msg = {"role": "system", "content": "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards with no board, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."}
+system_msg = {"role": "system", "content": "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."}
 
 def coach(user_input):
 	messages = [system_msg, {"role": "user", "content": user_input}]
-	response = client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
-	response_message = response.choices[0].message
-	tool_calls = response_message.tool_calls
-	if tool_calls:
-		messages.append(response_message)
-		for tool_call in tool_calls:
-			function_name = tool_call.function.name
-			function_args = json.loads(tool_call.function.arguments)
-			func = available.get(function_name)
-			result = func(**function_args) if func else "Function not found."
-			messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": result})
-		second = client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
+	response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
+	msg = response.choices[0].message
+	if msg.tool_calls:
+		messages.append(msg)
+		for tc in msg.tool_calls:
+			fn = available.get(tc.function.name)
+			result = fn(**json.loads(tc.function.arguments)) if fn else "Not found."
+			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
+		second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
 		return second.choices[0].message.content
-	return response_message.content
-
+	return msg.content
 class ChatRequest(BaseModel):
 	message: str
 
 @app.post("/api/chat")
-async def chat_endpoint(req: ChatRequest):
-	return {"reply": coach(req.message)}
+async def chat_endpoint(req: Request):
+	body = await req.json()
+	user_input = body.get("message", "")
+	auth_header = req.headers.get("authorization", "")
+	user_id = None
+	if auth_header.startswith("Bearer "):
+		token = auth_header[7:]
+		try:
+			resp = supabase.auth.get_user(token)
+			if resp and resp.user:
+				user_id = resp.user.id
+		except Exception:
+			pass
+	reply = coach(user_input)
+	if user_id:
+		try:
+			supabase.table("messages").insert({
+				"user_id": user_id,
+				"input": user_input,
+				"reply": reply
+			}).execute()
+		except Exception:
+			pass
+	return {"reply": reply}
