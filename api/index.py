@@ -2,7 +2,6 @@ import os
 import json
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from groq import Groq
 from treys import Card, Evaluator
 from supabase import create_client, Client
@@ -68,10 +67,10 @@ def log_hand(hand, position=None, action=None, result=None, amount=None):
 	tier_num = None
 	if len(hand) == 2 or len(hand) == 3:
 		try:
-			c1 = hand[0] + "s"
-			c2 = hand[1] + "c"
+			c1 = hand[0] + "h"
+			c2 = hand[1] + "d"
 			tier_num = get_hand_tier(to_canonical(c1, c2))
-		except Exception:
+		except:
 			pass
 	tier_name = TIER_NAMES.get(tier_num, None) if tier_num else None
 	return json.dumps({"hand": hand, "tier": tier_name, "position": position, "action": action, "result": result, "amount": amount})
@@ -79,11 +78,12 @@ def log_hand(hand, position=None, action=None, result=None, amount=None):
 tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards. Use when the player provides a board.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
 {"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards. Use when no board is provided.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB. Default BTN."}}, "required": ["card1", "card2"]}}},
-{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with the action taken and optional result. Use for tracking, not coaching.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The starting hand, e.g. AKo, 72s, JJ, 93o"}, "position": {"type": "string", "description": "Optional: UTG, MP, CO, BTN, SB, BB"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, 3-bet, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount won or lost"}}, "required": ["hand"]}}},
+{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with the action taken and optional result. Use for tracking, not coaching.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The starting hand, e.g. AKo, 72s, JJ, 93o"}, "position": {"type": "string", "description": "Optional position: UTG, MP, CO, BTN, SB, BB"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, 3-bet, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount won or lost"}}, "required": ["hand"]}}},
 ]
 
 available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand}
-def get_last_hand(user_id):
+
+def get_session_context(user_id):
 	try:
 		result = supabase.table("messages").select("input, hand, position").eq("user_id", user_id).order("created_at", desc=True).limit(10).execute()
 		if not result.data:
@@ -97,11 +97,10 @@ def get_last_hand(user_id):
 			elif anchor:
 				streets.append(msg.get("input", ""))
 		if anchor:
-			return {"hand": anchor["hand"], "position": anchor.get("position", ""), "prev_input": anchor.get("input", ""), "streets": streets}
-	except Exception:
+			return {"id_query": None, "hand": anchor["hand"], "position": anchor.get("position", ""), "prev_input": anchor.get("input", ""), "streets": streets}
+	except:
 		pass
 	return None
-
 def build_system(mode, session=None):
 	if mode == "track":
 		base = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."
@@ -113,16 +112,18 @@ def build_system(mode, session=None):
 		prev = session.get("prev_input", "")
 		streets = session.get("streets", [])
 		base += f" CONTEXT - this player is holding {hand}"
-		if pos: base += f" from {pos}"
+		if pos:
+			base += f" from {pos}"
 		base += f". their original message was '{prev}'."
 		if streets:
 			for s in streets:
-				if s: base += f" they then said: '{s}'."
+				if s:
+					base += f" they then said: '{s}'."
 		base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
 	return {"role": "system", "content": base}
 
 def run_pipeline(user_input, mode, user_id=None):
-	session = get_last_hand(user_id) if user_id else None
+	session = get_session_context(user_id) if user_id else None
 	system_msg = build_system(mode, session)
 	messages = [system_msg, {"role": "user", "content": user_input}]
 	response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
@@ -136,17 +137,11 @@ def run_pipeline(user_input, mode, user_id=None):
 			result = fn(**args) if fn else "Not found."
 			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
 			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
-				try:
-					parsed = json.loads(result)
-				except (TypeError, json.JSONDecodeError):
-					pass
+				try: parsed = json.loads(result)
+				except: pass
 		second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
-		return second.choices[0].message.content, parsed
-	return msg.content, parsed
-class ChatRequest(BaseModel):
-	message: str
-	mode: str = "coach"
-
+		return second.choices[0].message.content, parsed, session
+	return msg.content, parsed, session
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
 	body = await req.json()
@@ -160,39 +155,26 @@ async def chat_endpoint(req: Request):
 			resp = supabase.auth.get_user(token)
 			if resp and resp.user:
 				user_id = resp.user.id
-		except Exception:
+		except:
 			pass
-	reply, parsed = run_pipeline(user_input, mode, user_id)
+	reply, parsed, session = run_pipeline(user_input, mode, user_id)
 	if user_id:
 		try:
-			session = get_last_hand(user_id)
-			row = {"user_id": user_id, "input": user_input, "reply": reply}
-			if parsed.get("hand"): row["hand"] = parsed["hand"]
-			if parsed.get("tier"): row["tier"] = parsed["tier"]
-			if parsed.get("position"): row["position"] = parsed["position"]
-			if parsed.get("action"): row["player_action"] = parsed["action"]
-			if parsed.get("result"): row["result"] = parsed["result"]
-			if parsed.get("amount"): row["amount"] = parsed["amount"]
 			if session and session.get("hand") and parsed.get("hand_rank"):
 				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
 				if last.data and last.data[0]:
-					update = {"reply": reply}
-					if parsed.get("hand_rank"): update["hand_rank"] = parsed["hand_rank"]
-					supabase.table("messages").update(update).eq("id", last.data[0]["id"]).execute()
+					supabase.table("messages").update({"reply": reply}).eq("id", last.data[0]["id"]).execute()
 				else:
-					supabase.table("messages").insert(row).execute()
+					supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
 			else:
-				supabase.table("messages").insert(row).execute()
-		except Exception:
+				supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
+		except:
 			pass
 	return {"reply": reply, "parsed": parsed}
 
 @app.post("/api/result")
 async def result_endpoint(req: Request):
 	body = await req.json()
-	entry_id = body.get("id")
-	result = body.get("result")
-	amount = body.get("amount")
 	auth_header = req.headers.get("authorization", "")
 	if not auth_header.startswith("Bearer "):
 		return {"error": "unauthorized"}
@@ -201,26 +183,40 @@ async def result_endpoint(req: Request):
 		resp = supabase.auth.get_user(token)
 		if not resp or not resp.user:
 			return {"error": "unauthorized"}
-	except Exception:
+	except:
 		return {"error": "unauthorized"}
 	try:
-		supabase.table("messages").update({"result": result, "amount": amount}).eq("id", entry_id).execute()
+		supabase.table("messages").update({"result": body.get("result"), "amount": body.get("amount")}).eq("id", body.get("id")).execute()
 		return {"ok": True}
-	except Exception:
+	except:
 		return {"error": "could not save"}
 
 @app.get("/api/history")
 async def history_endpoint(req: Request):
+	body = await req.json()
+	user_input = body.get("message", "")
+	mode = body.get("mode", "coach")
 	auth_header = req.headers.get("authorization", "")
-	if not auth_header.startswith("Bearer "):
-		return {"error": "unauthorized"}
-	token = auth_header[7:]
-	try:
-		resp = supabase.auth.get_user(token)
-		if not resp or not resp.user:
-			return {"error": "unauthorized"}
-		user_id = resp.user.id
-	except Exception:
-		return {"error": "unauthorized"}
-	result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
-	return {"history": result.data}
+	user_id = None
+	if auth_header.startswith("Bearer "):
+		token = auth_header[7:]
+		try:
+			resp = supabase.auth.get_user(token)
+			if resp and resp.user:
+				user_id = resp.user.id
+		except Exception:
+			pass
+	reply, parsed, session = run_pipeline(user_input, mode, user_id)
+	if user_id:
+		try:
+			if session and session.get("hand") and parsed.get("hand_rank"):
+				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
+				if last.data and last.data[0]:
+					supabase.table("messages").update({"reply": reply}).eq("id", last.data[0]["id"]).execute()
+				else:
+					supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
+			else:
+				supabase.table("messages").insert({"user_id": user_id, "input": user_input, "reply": reply, "hand": parsed.get("hand"), "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}).execute()
+		except Exception:
+			pass
+	return {"reply": reply, "parsed": parsed}
