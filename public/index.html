@@ -8,7 +8,7 @@
 <title>AI Holdem Coach</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }
+<style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }.mode-active { background: #4f46e5; color: white; }.mode-inactive { background: #1e293b; color: #94a3b8; }
 </style>
 </head>
 <body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-slate-900 text-slate-100 font-sans">
@@ -45,6 +45,11 @@
 </div>
 
 <div id="coach-view" class="flex-1 flex flex-col">
+<div id="mode-toggle" class="flex gap-2 p-3 border-b border-slate-800">
+<button id="mode-coach-btn" class="flex-1 text-xs font-semibold py-2 rounded-lg mode-active transition">Coach</button>
+<button id="mode-track-btn" class="flex-1 text-xs font-semibold py-2 rounded-lg mode-inactive transition">Track</button>
+</div>
+<div id="mode-label" class="px-4 pt-2 pb-1"><p class="text-xs text-slate-500">Get real strategy on your hands.</p></div>
 <main id="chatbox" class="flex-1 overflow-y-auto p-4 space-y-4">
 <div class="flex items-start">
 <div class="bg-slate-800 text-slate-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">
@@ -79,6 +84,9 @@ const sb = supabase.createClient(supabaseUrl, supabaseKey);
 const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
 const logoutBtn = document.getElementById('logout-btn');
+let currentMode = 'coach';
+let lastEntryId = null;
+
 function showApp() { authScreen.classList.add('hidden'); appScreen.classList.remove('hidden'); logoutBtn.classList.remove('hidden'); }
 function showAuth() { authScreen.classList.remove('hidden'); appScreen.classList.add('hidden'); logoutBtn.classList.add('hidden'); }
 function showError(m) { const e = document.getElementById('auth-error'); e.textContent = m; e.classList.remove('hidden'); setTimeout(() => e.classList.add('hidden'), 4000); }
@@ -99,6 +107,32 @@ showApp();
 });
 logoutBtn.addEventListener('click', async () => { await sb.auth.signOut(); showAuth(); });
 sb.auth.getSession().then(({ data: { session } }) => { if (session) showApp(); });
+
+const modeCoachBtn = document.getElementById('mode-coach-btn');
+const modeTrackBtn = document.getElementById('mode-track-btn');
+const modeLabel = document.getElementById('mode-label');
+
+modeCoachBtn.addEventListener('click', () => {
+currentMode = 'coach';
+modeCoachBtn.className = modeCoachBtn.className.replace('mode-inactive', 'mode-active');
+modeTrackBtn.className = modeTrackBtn.className.replace('mode-active', 'mode-inactive');
+modeLabel.innerHTML = '<p class="text-xs text-slate-500">Get real strategy on your hands.</p>';
+resetChat();
+});
+modeTrackBtn.addEventListener('click', () => {
+currentMode = 'track';
+modeTrackBtn.className = modeTrackBtn.className.replace('mode-inactive', 'mode-active');
+modeCoachBtn.className = modeCoachBtn.className.replace('mode-active', 'mode-inactive');
+modeLabel.innerHTML = '<p class="text-xs text-slate-500">Log your hands, track your results. No advice - just data.</p>';
+resetChat();
+});
+
+function resetChat() {
+const chatbox = document.getElementById('chatbox');
+const intro = currentMode === 'coach'? 'Send me any poker hand - your hole cards, the board, your position - and I\'ll give you a real read.': 'Log a hand - what you played, where. No advice, just data. I\'ll ask for the result after.';
+chatbox.innerHTML = `<div class="flex items-start"><div class="bg-slate-800 text-slate-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">${intro}</div></div>`;
+document.getElementById('user-input').placeholder = currentMode === 'coach'? 'Type your hand...': 'Log your hand...';
+}
 
 const tabCoach = document.getElementById('tab-coach');
 const tabHistory = document.getElementById('tab-history');
@@ -138,23 +172,27 @@ const entries = data.history || [];
 const statsEl = document.getElementById('stats-section');
 const listEl = document.getElementById('history-list');
 if (entries.length === 0) {
-statsEl.innerHTML = '';
-listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No hands yet. Start coaching.</p>';
-return;
+statsEl.innerHTML = ''; listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No hands yet. Start coaching.</p>'; return;
 }
 const tiers = {}, positions = {}, hands = {};
+let wins = 0, losses = 0, profit = 0;
 entries.forEach(e => {
 if (e.tier) { const k = e.tier.toLowerCase(); tiers[k] = (tiers[k] || 0) + 1; }
 if (e.position) { positions[e.position] = (positions[e.position] || 0) + 1; }
 if (e.hand) { hands[e.hand] = (hands[e.hand] || 0) + 1; }
+if (e.result === 'won') { wins++; if (e.amount) profit += e.amount; }
+if (e.result === 'lost') { losses++; if (e.amount) profit -= e.amount; }
 });
 const topHand = Object.entries(hands).sort((a, b) => b[1] - a[1])[0];
 const topTier = Object.entries(tiers).sort((a, b) => b[1] - a[1])[0];
 const posLabels = Object.entries(positions).sort((a, b) => b[1] - a[1]).slice(0, 3).map(p => p[0]).join(', ');
+const hasResults = wins + losses > 0;
+const winRate = hasResults? Math.round((wins / (wins + losses)) * 100): null;
+const profitStr = profit >= 0? '+$' + profit.toFixed(2): '-$' + Math.abs(profit).toFixed(2);
 
 statsEl.innerHTML = `
 <h3 class="text-sm font-semibold text-slate-300">Your Stats</h3>
-<div class="grid grid-cols-3 gap-3">
+<div class="grid ${hasResults? 'grid-cols-4': 'grid-cols-3'} gap-3">
 <div class="bg-slate-800 rounded-lg p-3 text-center">
 <p class="text-lg font-bold text-indigo-400">${entries.length}</p>
 <p class="text-xs text-slate-500">Hands</p>
@@ -167,22 +205,60 @@ statsEl.innerHTML = `
 <p class="text-lg font-bold text-amber-400 capitalize">${topTier? topTier[0]: '-'}</p>
 <p class="text-xs text-slate-500">Top tier</p>
 </div>
+${hasResults? `
+<div class="bg-slate-800 rounded-lg p-3 text-center">
+<p class="text-lg font-bold ${profit >= 0? 'text-emerald-400': 'text-red-400'}">${profitStr}</p>
+<p class="text-xs text-slate-500">${winRate}% win</p>
+</div>`: ''}
 </div>
 ${posLabels? `<p class="text-xs text-slate-500 mt-1">Positions: ${posLabels}</p>`: ''}
 `;
 
 listEl.innerHTML = entries.map(e => `
 <div class="bg-slate-800 rounded-xl p-4 space-y-2">
-<div class="flex items-center gap-2">
+<div class="flex items-center gap-2 flex-wrap">
 ${e.hand? `<span class="text-sm font-bold text-indigo-400">${e.hand}</span>`: ''}
 ${e.tier? `<span class="text-xs font-semibold px-2 py-0.5 rounded ${tierClass(e.tier)} text-white capitalize">${e.tier}</span>`: ''}
 ${e.position? `<span class="text-xs text-slate-500">${e.position}</span>`: ''}
 <span class="text-xs text-slate-600 ml-auto">${new Date(e.created_at).toLocaleDateString()}</span>
 </div>
 <p class="text-sm text-slate-300">${e.reply}</p>
+${e.result? `
+<div class="flex items-center gap-2 pt-1 border-t border-slate-700 mt-1">
+<span class="text-xs font-semibold ${e.result === 'won'? 'text-emerald-400': 'text-red-400'}">${e.result === 'won'? 'Won': 'Lost'}</span>
+${e.amount? `<span class="text-xs ${e.result === 'won'? 'text-emerald-400': 'text-red-400'}">$${e.amount.toFixed(2)}</span>`: ''}
+</div>
+`: `
+<div class="pt-1 border-t border-slate-700 mt-1 space-y-2">
+<p class="text-xs text-slate-500">Result?</p>
+<div class="flex gap-2">
+<button onclick="logResult(${e.id}, 'won')" class="flex-1 text-xs font-semibold py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white">Won</button>
+<button onclick="logResult(${e.id}, 'lost')" class="flex-1 text-xs font-semibold py-1.5 rounded bg-red-600 hover:bg-red-500 text-white">Lost</button>
+</div>
+<div class="flex gap-2">
+<input id="amt-${e.id}" type="number" step="0.01" placeholder="Amount" class="flex-1 bg-slate-700 text-slate-100 text-xs rounded px-3 py-1.5 outline-none border border-slate-600" />
+<button onclick="logResult(${e.id}, document.querySelector('[onclick*=' + ${e.id} + ']')?.closest('.bg-slate-800')?.querySelector('.bg-emerald-600')? 'won': 'lost')" class="hidden">x</button>
+</div>
+</div>
+`}
 </div>
 `).join('');
-} catch { document.getElementById('history-list').innerHTML = '<p class="text-sm text-red-400 text-center py-8">Could not load history.</p>'; }
+} catch { document.getElementById('history-list').innerHTML = '<p class="text-sm text-red-400 text-center py-8">Could not load.</p>'; }
+}
+
+async function logResult(entryId, result) {
+const { data: { session } } = await sb.auth.getSession();
+if (!session) return;
+const amtInput = document.getElementById('amt-' + entryId);
+const amount = amtInput && amtInput.value? parseFloat(amtInput.value): null;
+try {
+await fetch('/api/result', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
+body: JSON.stringify({ id: entryId, result, amount })
+});
+loadHistory();
+} catch {}
 }
 
 const chatbox = document.getElementById('chatbox');
@@ -203,8 +279,18 @@ const lb = appendMessage('...', false);
 const { data: { session } } = await sb.auth.getSession();
 try {
 const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] = 'Bearer ' + session.access_token;
-const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify({ message: text }) });
-const data = await res.json(); lb.textContent = data.reply || data.error || 'No response.';
+const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify({ message: text, mode: currentMode }) });
+const data = await res.json();
+lb.textContent = data.reply || data.error || 'No response.';
+if (currentMode === 'track' && data.parsed && data.parsed.hand) {
+setTimeout(() => {
+const follow = document.createElement('div'); follow.className = 'flex justify-start';
+const fb = document.createElement('div');
+fb.className = 'bg-emerald-900/50 text-emerald-300 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm';
+fb.textContent = 'Result? Tap history to log whether you won or lost, and how much.';
+follow.appendChild(fb); chatbox.appendChild(follow); chatbox.scrollTop = chatbox.scrollHeight;
+}, 800);
+}
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
 finally { input.disabled = false; sendBtn.disabled = false; input.focus(); chatbox.scrollTop = chatbox.scrollHeight; }
 }
