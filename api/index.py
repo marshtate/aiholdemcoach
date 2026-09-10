@@ -68,10 +68,11 @@ def log_hand(hand, position=None, action=None, result=None, amount=None):
 	tier_num = None
 	if len(hand) == 2 or len(hand) == 3:
 		try:
-			c1 = hand[0] + ("h" if hand[0]!= hand[0] else "s")
-			c2 = hand[1] + ("d" if hand[1]!= hand[1] else "c")
+			c1 = hand[0] + "s"
+			c2 = hand[1] + "c"
 			tier_num = get_hand_tier(to_canonical(c1, c2))
-		except: pass
+		except Exception:
+			pass
 	tier_name = TIER_NAMES.get(tier_num, None) if tier_num else None
 	return json.dumps({"hand": hand, "tier": tier_name, "position": position, "action": action, "result": result, "amount": amount})
 
@@ -82,12 +83,33 @@ tools = [
 ]
 
 available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand}
+def get_last_hand(user_id):
+	try:
+		result = supabase.table("messages").select("hand, position, input").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
+		if result.data and result.data[0].get("hand"):
+			return result.data[0]
+	except Exception:
+		pass
+	return None
 
-coach_system = {"role": "system", "content": "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."}
+def build_system(mode, last_hand=None):
+	if mode == "track":
+		base = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."
+	else:
+		base = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand to compute real math. When a player describes ONLY hole cards with no board, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."
+	if last_hand and last_hand.get("hand"):
+		hand = last_hand["hand"]
+		pos = last_hand.get("position", "")
+		prev = last_hand.get("input", "")
+		base += f" CONTEXT - this player's last message was '{prev}', which was parsed as hand {hand}"
+		if pos:
+			base += f" from {pos}"
+		base += ". If their new message seems like a continuation - a board, flop, turn, river, result - treat it as the SAME hand. If they describe a board, use evaluate_poker_hand with their hole cards from that hand plus the board they're describing."
+	return {"role": "system", "content": base}
 
-track_system = {"role": "system", "content": "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."}
-
-def run_pipeline(user_input, system_msg):
+def run_pipeline(user_input, mode, user_id=None):
+	last_hand = get_last_hand(user_id) if user_id else None
+	system_msg = build_system(mode, last_hand)
 	messages = [system_msg, {"role": "user", "content": user_input}]
 	response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
 	msg = response.choices[0].message
@@ -124,12 +146,9 @@ async def chat_endpoint(req: Request):
 			resp = supabase.auth.get_user(token)
 			if resp and resp.user:
 				user_id = resp.user.id
-		except:
+		except Exception:
 			pass
-	if mode == "track":
-		reply, parsed = run_pipeline(user_input, track_system)
-	else:
-		reply, parsed = run_pipeline(user_input, coach_system)
+	reply, parsed = run_pipeline(user_input, mode, user_id)
 	if user_id:
 		try:
 			row = {"user_id": user_id, "input": user_input, "reply": reply}
@@ -141,7 +160,7 @@ async def chat_endpoint(req: Request):
 			if parsed.get("amount"): row["amount"] = parsed["amount"]
 			if parsed.get("hand_rank"): row["hand"] = parsed["hand_rank"]
 			supabase.table("messages").insert(row).execute()
-		except:
+		except Exception:
 			pass
 	return {"reply": reply, "parsed": parsed}
 
@@ -159,12 +178,12 @@ async def result_endpoint(req: Request):
 		resp = supabase.auth.get_user(token)
 		if not resp or not resp.user:
 			return {"error": "unauthorized"}
-	except:
+	except Exception:
 		return {"error": "unauthorized"}
 	try:
 		supabase.table("messages").update({"result": result, "amount": amount}).eq("id", entry_id).execute()
 		return {"ok": True}
-	except:
+	except Exception:
 		return {"error": "could not save"}
 
 @app.get("/api/history")
@@ -178,7 +197,7 @@ async def history_endpoint(req: Request):
 		if not resp or not resp.user:
 			return {"error": "unauthorized"}
 		user_id = resp.user.id
-	except:
+	except Exception:
 		return {"error": "unauthorized"}
 	result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
 	return {"history": result.data}
