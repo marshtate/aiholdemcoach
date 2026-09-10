@@ -64,16 +64,28 @@ def preflop_advice(card1, card2, position="BTN"):
 	else: action = "Fold"
 	return json.dumps({"hand": hand, "tier": TIER_NAMES[tier], "position": pos, "action": action})
 
+def log_hand(hand, position=None, action=None, result=None, amount=None):
+	tier_num = None
+	if len(hand) == 2 or len(hand) == 3:
+		try:
+			c1 = hand[0] + ("h" if hand[0]!= hand[0] else "s")
+			c2 = hand[1] + ("d" if hand[1]!= hand[1] else "c")
+			tier_num = get_hand_tier(to_canonical(c1, c2))
+		except: pass
+	tier_name = TIER_NAMES.get(tier_num, None) if tier_num else None
+	return json.dumps({"hand": hand, "tier": tier_name, "position": position, "action": action, "result": result, "amount": amount})
+
 tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards. Use when the player provides a board.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
 {"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards. Use when no board is provided.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB. Default BTN."}}, "required": ["card1", "card2"]}}},
+{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with the action taken and optional result. Use for tracking, not coaching.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The starting hand, e.g. AKo, 72s, JJ, 93o"}, "position": {"type": "string", "description": "Optional: UTG, MP, CO, BTN, SB, BB"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, 3-bet, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount won or lost"}}, "required": ["hand"]}}},
 ]
 
-available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice}
+available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand}
 
 coach_system = {"role": "system", "content": "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."}
 
-track_system = {"role": "system", "content": "You are a poker hand parser. Extract the hand and position from the message and call the appropriate tool. Respond ONLY with the parsed result in this format: 'Logged - [hand], [tier] tier, [position].' No advice, no strategy, no coaching."}
+track_system = {"role": "system", "content": "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."}
 
 def run_pipeline(user_input, system_msg):
 	messages = [system_msg, {"role": "user", "content": user_input}]
@@ -87,9 +99,11 @@ def run_pipeline(user_input, system_msg):
 			args = json.loads(tc.function.arguments)
 			result = fn(**args) if fn else "Not found."
 			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
-			if tc.function.name in ("preflop_advice", "evaluate_poker_hand"):
-				try: parsed = json.loads(result)
-				except: pass
+			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
+				try:
+					parsed = json.loads(result)
+				except (TypeError, json.JSONDecodeError):
+					pass
 		second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages)
 		return second.choices[0].message.content, parsed
 	return msg.content, parsed
@@ -110,7 +124,7 @@ async def chat_endpoint(req: Request):
 			resp = supabase.auth.get_user(token)
 			if resp and resp.user:
 				user_id = resp.user.id
-		except Exception:
+		except:
 			pass
 	if mode == "track":
 		reply, parsed = run_pipeline(user_input, track_system)
@@ -122,10 +136,12 @@ async def chat_endpoint(req: Request):
 			if parsed.get("hand"): row["hand"] = parsed["hand"]
 			if parsed.get("tier"): row["tier"] = parsed["tier"]
 			if parsed.get("position"): row["position"] = parsed["position"]
-			if parsed.get("action"): row["action"] = parsed["action"]
+			if parsed.get("action"): row["player_action"] = parsed["action"]
+			if parsed.get("result"): row["result"] = parsed["result"]
+			if parsed.get("amount"): row["amount"] = parsed["amount"]
 			if parsed.get("hand_rank"): row["hand"] = parsed["hand_rank"]
 			supabase.table("messages").insert(row).execute()
-		except Exception:
+		except:
 			pass
 	return {"reply": reply, "parsed": parsed}
 
@@ -164,5 +180,5 @@ async def history_endpoint(req: Request):
 		user_id = resp.user.id
 	except:
 		return {"error": "unauthorized"}
-	result = supabase.table("messages").select("id, input, reply, hand, tier, position, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
+	result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
 	return {"history": result.data}
