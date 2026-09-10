@@ -8,7 +8,7 @@
 <title>AI Holdem Coach</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }.mode-active { background: #4f46e5; color: white; }.mode-inactive { background: #1e293b; color: #94a3b8; }
+<style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }.mode-active { background: #4f46e5; color: white; }.mode-inactive { background: #1e293b; color: #94a3b8; }.bar { height: 6px; border-radius: 3px; transition: width 0.4s ease; }
 </style>
 </head>
 <body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-slate-900 text-slate-100 font-sans">
@@ -40,11 +40,12 @@
 
 <div id="app-screen" class="hidden flex-1 flex flex-col">
 <div class="flex border-b border-slate-800">
-<button id="tab-coach" class="flex-1 py-3 text-sm font-semibold tab-active transition">Coach</button>
+<button id="tab-chat" class="flex-1 py-3 text-sm font-semibold tab-active transition">Chat</button>
 <button id="tab-history" class="flex-1 py-3 text-sm font-semibold tab-inactive transition">History</button>
+<button id="tab-stats" class="flex-1 py-3 text-sm font-semibold tab-inactive transition">Stats</button>
 </div>
 
-<div id="coach-view" class="flex-1 flex flex-col">
+<div id="chat-view" class="flex-1 flex flex-col">
 <div id="mode-toggle" class="flex gap-2 p-3 border-b border-slate-800">
 <button id="mode-coach-btn" class="flex-1 text-xs font-semibold py-2 rounded-lg mode-active transition">Coach</button>
 <button id="mode-track-btn" class="flex-1 text-xs font-semibold py-2 rounded-lg mode-inactive transition">Track</button>
@@ -69,11 +70,12 @@ Send me any poker hand - your hole cards, the board, your position - and I'll gi
 </footer>
 </div>
 
-<div id="history-view" class="hidden flex-1 overflow-y-auto">
-<div id="stats-section" class="p-4 border-b border-slate-800 space-y-3"></div>
-<div id="history-list" class="p-4 space-y-3">
-<p class="text-sm text-slate-500 text-center py-8">No hands yet. Start coaching.</p>
+<div id="history-view" class="hidden flex-1 overflow-y-auto p-4 space-y-3">
+<p class="text-sm text-slate-500 text-center py-8">No hands yet.</p>
 </div>
+
+<div id="stats-view" class="hidden flex-1 overflow-y-auto p-4 space-y-4">
+<p class="text-sm text-slate-500 text-center py-8">No data yet.</p>
 </div>
 </div>
 
@@ -85,6 +87,7 @@ const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
 const logoutBtn = document.getElementById('logout-btn');
 let currentMode = 'coach';
+let cachedHistory = null;
 
 function showApp() { authScreen.classList.add('hidden'); appScreen.classList.remove('hidden'); logoutBtn.classList.remove('hidden'); }
 function showAuth() { authScreen.classList.remove('hidden'); appScreen.classList.add('hidden'); logoutBtn.classList.add('hidden'); }
@@ -122,33 +125,32 @@ modeTrackBtn.addEventListener('click', () => {
 currentMode = 'track';
 modeTrackBtn.className = modeTrackBtn.className.replace('mode-inactive', 'mode-active');
 modeCoachBtn.className = modeCoachBtn.className.replace('mode-active', 'mode-inactive');
-modeLabel.innerHTML = '<p class="text-xs text-slate-500">Log your hands, track your results. No advice - just data.</p>';
+modeLabel.innerHTML = '<p class="text-xs text-slate-500">Log your hands - like texting from the table. No advice, just data.</p>';
 resetChat();
 });
 
 function resetChat() {
 const chatbox = document.getElementById('chatbox');
-const intro = currentMode === 'coach'? 'Send me any poker hand - your hole cards, the board, your position - and I\'ll give you a real read.': 'Log a hand - what you played, where, what happened. Like texting from the table. No advice, just data.';
+const intro = currentMode === 'coach'? 'Send me any poker hand - your hole cards, the board, your position - and I\'ll give you a real read.': 'Log a hand - what you played, where, what happened. Like texting from the table.';
 chatbox.innerHTML = `<div class="flex items-start"><div class="bg-slate-800 text-slate-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">${intro}</div></div>`;
 document.getElementById('user-input').placeholder = currentMode === 'coach'? 'Type your hand...': 'Log your hand...';
 }
 
-const tabCoach = document.getElementById('tab-coach');
+const tabChat = document.getElementById('tab-chat');
 const tabHistory = document.getElementById('tab-history');
-const coachView = document.getElementById('coach-view');
+const tabStats = document.getElementById('tab-stats');
+const chatView = document.getElementById('chat-view');
 const historyView = document.getElementById('history-view');
+const statsView = document.getElementById('stats-view');
 
-tabCoach.addEventListener('click', () => {
-tabCoach.className = tabCoach.className.replace('tab-inactive', 'tab-active');
-tabHistory.className = tabHistory.className.replace('tab-active', 'tab-inactive');
-coachView.classList.remove('hidden'); historyView.classList.add('hidden');
-});
-tabHistory.addEventListener('click', async () => {
-tabHistory.className = tabHistory.className.replace('tab-inactive', 'tab-active');
-tabCoach.className = tabCoach.className.replace('tab-active', 'tab-inactive');
-coachView.classList.add('hidden'); historyView.classList.remove('hidden');
-loadHistory();
-});
+function setActiveTab(active) {
+[tabChat, tabHistory, tabStats].forEach(t => t.className = t.className.replace('tab-active', 'tab-inactive'));
+chatView.classList.add('hidden'); historyView.classList.add('hidden'); statsView.classList.add('hidden');
+active.className = active.className.replace('tab-inactive', 'tab-active');
+}
+tabChat.addEventListener('click', () => { setActiveTab(tabChat); chatView.classList.remove('hidden'); });
+tabHistory.addEventListener('click', () => { setActiveTab(tabHistory); historyView.classList.remove('hidden'); loadHistory(); });
+tabStats.addEventListener('click', () => { setActiveTab(tabStats); statsView.classList.remove('hidden'); loadStats(); });
 
 function tierClass(t) {
 if (!t) return 'tier-speculative';
@@ -161,51 +163,23 @@ if (l === 'trash') return 'tier-trash';
 return 'tier-speculative';
 }
 
-async function loadHistory() {
+async function fetchHistory() {
+if (cachedHistory) return cachedHistory;
 const { data: { session } } = await sb.auth.getSession();
-if (!session) return;
+if (!session) return [];
 try {
 const res = await fetch('/api/history', { headers: { 'Authorization': 'Bearer ' + session.access_token } });
 const data = await res.json();
-const entries = data.history || [];
-const statsEl = document.getElementById('stats-section');
-const listEl = document.getElementById('history-list');
-if (entries.length === 0) {
-statsEl.innerHTML = ''; listEl.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No hands yet.</p>'; return;
+cachedHistory = data.history || [];
+return cachedHistory;
+} catch { return []; }
 }
-const tiers = {}, positions = {}, hands = {}, actions = {};
-let wins = 0, losses = 0, folds = 0, profit = 0;
-entries.forEach(e => {
-if (e.tier) { const k = e.tier.toLowerCase(); tiers[k] = (tiers[k] || 0) + 1; }
-if (e.position) { positions[e.position] = (positions[e.position] || 0) + 1; }
-if (e.hand) { hands[e.hand] = (hands[e.hand] || 0) + 1; }
-if (e.player_action) { actions[e.player_action] = (actions[e.player_action] || 0) + 1; }
-if (e.result === 'won') { wins++; if (e.amount) profit += e.amount; }
-if (e.result === 'lost') { losses++; if (e.amount) profit -= e.amount; }
-if (e.player_action && e.player_action.toLowerCase() === 'fold') folds++;
-});
-const topHand = Object.entries(hands).sort((a, b) => b[1] - a[1])[0];
-const topTier = Object.entries(tiers).sort((a, b) => b[1] - a[1])[0];
-const hasResults = wins + losses > 0;
-const winRate = hasResults? Math.round((wins / (wins + losses)) * 100): null;
-const profitStr = profit >= 0? '+$' + profit.toFixed(2): '-$' + Math.abs(profit).toFixed(2);
-const foldPct = entries.length > 0? Math.round((folds / entries.length) * 100): 0;
 
-let statsHTML = `<h3 class="text-sm font-semibold text-slate-300">Your Stats</h3><div class="grid grid-cols-3 gap-3">`;
-statsHTML += `<div class="bg-slate-800 rounded-lg p-3 text-center"><p class="text-lg font-bold text-indigo-400">${entries.length}</p><p class="text-xs text-slate-500">Hands</p></div>`;
-statsHTML += `<div class="bg-slate-800 rounded-lg p-3 text-center"><p class="text-lg font-bold text-emerald-400">${topHand? topHand[0]: '-'}</p><p class="text-xs text-slate-500">Most studied</p></div>`;
-statsHTML += `<div class="bg-slate-800 rounded-lg p-3 text-center"><p class="text-lg font-bold text-amber-400 capitalize">${topTier? topTier[0]: '-'}</p><p class="text-xs text-slate-500">Top tier</p></div>`;
-statsHTML += `</div><div class="grid grid-cols-2 gap-3 mt-3">`;
-statsHTML += `<div class="bg-slate-800 rounded-lg p-3 text-center"><p class="text-lg font-bold text-slate-300">${foldPct}%</p><p class="text-xs text-slate-500">Fold rate</p></div>`;
-if (hasResults) {
-statsHTML += `<div class="bg-slate-800 rounded-lg p-3 text-center"><p class="text-lg font-bold ${profit >= 0? 'text-emerald-400': 'text-red-400'}">${profitStr}</p><p class="text-xs text-slate-500">${winRate}% win</p></div>`;
-} else {
-statsHTML += `<div class="bg-slate-800 rounded-lg p-3 text-center"><p class="text-lg font-bold text-slate-500">-</p><p class="text-xs text-slate-500">Log results</p></div>`;
-}
-statsHTML += `</div>`;
-statsEl.innerHTML = statsHTML;
-
-listEl.innerHTML = entries.map(e => {
+async function loadHistory() {
+const entries = await fetchHistory();
+const el = document.getElementById('history-view');
+if (entries.length === 0) { el.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No hands yet.</p>'; return; }
+el.innerHTML = entries.map(e => {
 let top = '<div class="flex items-center gap-2 flex-wrap">';
 if (e.hand) top += `<span class="text-sm font-bold text-indigo-400">${e.hand}</span>`;
 if (e.tier) top += `<span class="text-xs font-semibold px-2 py-0.5 rounded ${tierClass(e.tier)} text-white capitalize">${e.tier}</span>`;
@@ -232,7 +206,101 @@ resultHTML = `<div class="pt-1 border-t border-slate-700 mt-1 space-y-2">
 }
 return `<div class="bg-slate-800 rounded-xl p-4 space-y-2">${top}<p class="text-sm text-slate-300">${e.reply}</p>${resultHTML}</div>`;
 }).join('');
-} catch { document.getElementById('history-list').innerHTML = '<p class="text-sm text-red-400 text-center py-8">Could not load.</p>'; }
+}
+
+async function loadStats() {
+const entries = await fetchHistory();
+const el = document.getElementById('stats-view');
+if (entries.length === 0) { el.innerHTML = '<p class="text-sm text-slate-500 text-center py-8">No data yet.</p>'; return; }
+
+const tiers = {}, positions = {}, hands = {}, actions = {};
+let wins = 0, losses = 0, folds = 0, profit = 0;
+entries.forEach(e => {
+if (e.tier) { const k = e.tier.toLowerCase(); tiers[k] = (tiers[k] || 0) + 1; }
+if (e.position) { positions[e.position] = (positions[e.position] || 0) + 1; }
+if (e.hand) { hands[e.hand] = (hands[e.hand] || 0) + 1; }
+if (e.player_action) { const a = e.player_action.toLowerCase(); actions[a] = (actions[a] || 0) + 1; if (a === 'fold') folds++; }
+if (e.result === 'won') { wins++; if (e.amount) profit += e.amount; }
+if (e.result === 'lost') { losses++; if (e.amount) profit -= e.amount; }
+});
+
+const hasResults = wins + losses > 0;
+const winRate = hasResults? Math.round((wins / (wins + losses)) * 100): null;
+const profitStr = profit >= 0? '+$' + profit.toFixed(2): '-$' + Math.abs(profit).toFixed(2);
+const foldPct = entries.length > 0? Math.round((folds / entries.length) * 100): 0;
+
+let html = '';
+
+html += `<div class="bg-slate-800 rounded-xl p-4 space-y-2">
+<h3 class="text-sm font-semibold text-slate-300">Overview</h3>
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-slate-900 rounded-lg p-3 text-center">
+<p class="text-xl font-bold text-indigo-400">${entries.length}</p>
+<p class="text-xs text-slate-500">Hands</p>
+</div>
+<div class="bg-slate-900 rounded-lg p-3 text-center">
+<p class="text-xl font-bold text-slate-300">${foldPct}%</p>
+<p class="text-xs text-slate-500">Fold rate</p>
+</div>
+${hasResults? `
+<div class="bg-slate-900 rounded-lg p-3 text-center">
+<p class="text-xl font-bold ${profit >= 0? 'text-emerald-400': 'text-red-400'}">${profitStr}</p>
+<p class="text-xs text-slate-500">Profit</p>
+</div>
+<div class="bg-slate-900 rounded-lg p-3 text-center">
+<p class="text-xl font-bold text-amber-400">${winRate}%</p>
+<p class="text-xs text-slate-500">Win rate</p>
+</div>`: `
+<div class="bg-slate-900 rounded-lg p-3 text-center col-span-2">
+<p class="text-sm text-slate-500">Log results to see profit and win rate</p>
+</div>`}
+</div>
+</div>`;
+
+const topHands = Object.entries(hands).sort((a, b) => b[1] - a[1]).slice(0, 5);
+if (topHands.length > 0) {
+const maxH = topHands[0][1];
+html += `<div class="bg-slate-800 rounded-xl p-4 space-y-3">
+<h3 class="text-sm font-semibold text-slate-300">Most studied hands</h3>
+${topHands.map(([h, c]) => `
+<div class="space-y-1">
+<div class="flex justify-between text-xs"><span class="text-indigo-400 font-bold">${h}</span><span class="text-slate-500">${c}</span></div>
+<div class="w-full bg-slate-900 rounded-full"><div class="bar bg-indigo-500" style="width: ${Math.round((c / maxH) * 100)}%"></div></div>
+</div>`).join('')}
+</div>`;
+}
+
+const tierOrder = ['premium', 'strong', 'playable', 'speculative', 'trash'];
+const tierColors = { premium: 'bg-red-500', strong: 'bg-orange-500', playable: 'bg-yellow-500', speculative: 'bg-blue-500', trash: 'bg-slate-500' };
+const tierEntries = tierOrder.filter(t => tiers[t]);
+if (tierEntries.length > 0) {
+const maxT = Math.max(...tierEntries.map(t => tiers[t]));
+html += `<div class="bg-slate-800 rounded-xl p-4 space-y-3">
+<h3 class="text-sm font-semibold text-slate-300">Tier breakdown</h3>
+${tierEntries.map(t => `
+<div class="space-y-1">
+<div class="flex justify-between text-xs"><span class="capitalize text-slate-300">${t}</span><span class="text-slate-500">${tiers[t]}</span></div>
+<div class="w-full bg-slate-900 rounded-full"><div class="bar ${tierColors[t]}" style="width: ${Math.round((tiers[t] / maxT) * 100)}%"></div></div>
+</div>`).join('')}
+</div>`;
+}
+
+const actionOrder = ['fold', 'call', 'raise', '3-bet', 'check', 'all-in'];
+const actionColors = { fold: 'bg-slate-500', call: 'bg-blue-500', raise: 'bg-emerald-500', '3-bet': 'bg-purple-500', check: 'bg-slate-400', 'all-in': 'bg-red-500' };
+const actionEntries = actionOrder.filter(a => actions[a]);
+if (actionEntries.length > 0) {
+const maxA = Math.max(...actionEntries.map(a => actions[a]));
+html += `<div class="bg-slate-800 rounded-xl p-4 space-y-3">
+<h3 class="text-sm font-semibold text-slate-300">Action breakdown</h3>
+${actionEntries.map(a => `
+<div class="space-y-1">
+<div class="flex justify-between text-xs"><span class="capitalize text-slate-300">${a}</span><span class="text-slate-500">${actions[a]}</span></div>
+<div class="w-full bg-slate-900 rounded-full"><div class="bar ${actionColors[a] || 'bg-slate-500'}" style="width: ${Math.round((actions[a] / maxA) * 100)}%"></div></div>
+</div>`).join('')}
+</div>`;
+}
+
+el.innerHTML = html;
 }
 
 async function logResult(entryId, result) {
@@ -246,6 +314,7 @@ method: 'POST',
 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
 body: JSON.stringify({ id: entryId, result, amount })
 });
+cachedHistory = null;
 loadHistory();
 } catch {}
 }
@@ -271,6 +340,7 @@ const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] 
 const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify({ message: text, mode: currentMode }) });
 const data = await res.json();
 lb.textContent = data.reply || data.error || 'No response.';
+cachedHistory = null;
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
 finally { input.disabled = false; sendBtn.disabled = false; input.focus(); chatbox.scrollTop = chatbox.scrollHeight; }
 }
