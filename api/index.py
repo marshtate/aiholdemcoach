@@ -1,19 +1,10 @@
 import os
 import json
-import importlib
-from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from treys import Card, Evaluator
-
-try:
-	_supabase = importlib.import_module("supabase")
-	create_client = _supabase.create_client
-	Client = Any
-except ImportError:
-	create_client = None
-	Client = Any
+from supabase import create_client, Client
 
 app = FastAPI()
 
@@ -25,9 +16,7 @@ allow_headers=["*"],)
 
 try:
 	groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-	if create_client is None:
-		raise ImportError("The 'supabase' package is required")
-	supabase = create_client(os.environ.get("SUPABASE_URL"),
+	supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
 	os.environ.get("SUPABASE_SERVICE_KEY"))
 	evaluator = Evaluator()
 	startup_ok = True
@@ -83,13 +72,29 @@ def preflop_advice(card1, card2, position="BTN"):
 def log_hand(hand, position=None, action=None, result=None, amount=None):
 	return json.dumps({"hand": hand, "position": position, "action": action, "result": result, "amount": amount})
 
+def close_session(profit):
+	return json.dumps({"closed": True, "profit": profit})
+
+def get_or_create_session(user_id):
+	try:
+		result = supabase.table("sessions").select("id").eq("user_id", user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute()
+		if result.data and result.data[0]:
+			return result.data[0]["id"]
+		new = supabase.table("sessions").insert({"user_id": user_id}).execute()
+		if new.data and new.data[0]:
+			return new.data[0]["id"]
+	except:
+		pass
+	return None
+
 tools = [
-{"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards. Use when the player provides a board.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
-{"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards. Use when no board is provided.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB. Default BTN."}}, "required": ["card1", "card2"]}}},
-{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with the action taken and optional result. Use for tracking, not coaching.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The starting hand, e.g. AKo, 72s, JJ, 93o"}, "position": {"type": "string", "description": "Optional position: UTG, MP, CO, BTN, SB, BB"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, 3-bet, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount won or lost"}}, "required": ["hand"]}}},
+{"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
+{"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB."}}, "required": ["card1", "card2"]}}},
+{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ"}, "position": {"type": "string", "description": "Optional position"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount"}}, "required": ["hand"]}}},
+{"type": "function", "function": {"name": "close_session", "description": "Close the player's session with their total profit or loss for the night.", "parameters": {"type": "object", "properties": {"profit": {"type": "number", "description": "The total profit (positive) or loss (negative) for the session, in dollars"}}, "required": ["profit"]}}},
 ]
 
-available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand}
+available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand, "close_session": close_session}
 def get_session_context(user_id):
 	try:
 		result = supabase.table("messages").select("input, hand, position").eq("user_id", user_id).order("created_at", desc=True).limit(10).execute()
@@ -105,39 +110,40 @@ def get_session_context(user_id):
 				streets.append(m.get("input", ""))
 		if anchor:
 			return {"hand": anchor["hand"], "position": anchor.get("position", ""), "prev_input": anchor.get("input", ""), "streets": streets}
-	except Exception:
+	except:
 		pass
 	return None
 
-coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand to compute real math. When they describe ONLY hole cards with no board, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."
+coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond ONLY with: 'Logged - [hand], [action if any], [result if any], [amount if any].' No advice. No strategy. No quality judgment - never say if a hand is good, playable, strong, or trash."
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. CRITICAL - if they don't state exact hole cards, do NOT guess - respond 'What hand were you holding?'. If they tell you their total for the night - profit or loss - call close_session with that number, positive for profit, negative for loss. Respond ONLY with: 'Session closed - [profit/loss].' Never give advice. Never judge a hand's quality."
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
-	if session and session.get("hand"):
+	if session and session.get("hand") and mode == "coach":
 		hand = session["hand"]
 		pos = session.get("position", "")
 		prev = session.get("prev_input", "")
 		streets = session.get("streets", [])
-		if mode == "coach":
-			base += f" CONTEXT - this player is holding {hand}"
-			if pos:
-				base += f" from {pos}"
-			base += f". their original message was '{prev}'."
-			if streets:
-				for s in streets:
-					if s:
-						base += f" they then said: '{s}'."
-			base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
-		else:
-			base += f" CONTEXT - this player is holding {hand}"
-			if pos:
-				base += f" from {pos}"
-			base += ". Their new message is about this same hand. Call log_hand with this hand and whatever they say about it - a board, an action, a result, an amount. If they say they won or lost, include result. If they say an amount, include it."
+		base += f" CONTEXT - holding {hand}"
+		if pos: base += f" from {pos}"
+		base += f". original: '{prev}'."
+		if streets:
+			for s in streets:
+				if s: base += f" then: '{s}'."
+		base += " Continuation - if they describe a board, use evaluate_poker_hand with hole cards plus ALL cards mentioned."
+	elif session and session.get("hand") and mode == "track":
+		hand = session["hand"]
+		pos = session.get("position", "")
+		base += f" CONTEXT - holding {hand}"
+		if pos: base += f" from {pos}"
+		base += ". New message is about this same hand - call log_hand with this hand and what they say. But if they state new hole cards - different from this - it's a new hand, log that instead."
 	return {"role": "system", "content": base}
 
-def format_track(parsed, session=None):
+def format_track(parsed, session=None, closed=False):
+	if closed and parsed.get("profit") is not None:
+		p = parsed["profit"]
+		return f"Session closed - {'+' if p >= 0 else ''}{p}."
 	hand = parsed.get("hand") or (session.get("hand") if session else None) or "?"
 	parts = [hand]
 	if parsed.get("position"): parts.append(parsed["position"])
@@ -159,6 +165,7 @@ def run_pipeline(user_input, mode, user_id=None):
 	parsed = {}
 	if msg.tool_calls:
 		messages.append(msg)
+		closed = False
 		for tc in msg.tool_calls:
 			fn = available.get(tc.function.name)
 			try:
@@ -167,28 +174,37 @@ def run_pipeline(user_input, mode, user_id=None):
 			except Exception as e:
 				result = json.dumps({"error": f"Tool failed: {str(e)}"})
 			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
-			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
+			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand", "close_session"):
 				try: parsed = json.loads(result)
 				except: pass
-	if mode == "track":
-		reply = format_track(parsed, session)
-		return reply, parsed, session
-	eval_data = ""
-	if parsed.get("hand"): eval_data += f"Hand: {parsed['hand']}. "
-	if parsed.get("tier"): eval_data += f"Tier: {parsed['tier']}. "
-	if parsed.get("position"): eval_data += f"Position: {parsed['position']}. "
-	if parsed.get("action"): eval_data += f"Strategy: {parsed['action']}. "
-	if parsed.get("hand_rank"): eval_data += f"Hand rank: {parsed['hand_rank']}. Score: {parsed.get('score', '')}. "
-	if not eval_data: eval_data = json.dumps(parsed)
-	clean = [
-		{"role": "system", "content": "You are a poker coach. The player asked about their hand, and this is the data. Respond in 2-3 short friendly sentences. No tool calls."},
-		{"role": "user", "content": f"Player asked: {user_input}\n\nData: {eval_data.strip()}"}
-	]
-	try:
-		second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
-		return second.choices[0].message.content, parsed, session
-	except Exception as e:
-		return format_track(parsed, session), parsed, session
+			if tc.function.name == "close_session":
+				closed = True
+		if mode == "track":
+			reply = format_track(parsed, session, closed)
+			if closed and user_id:
+				try:
+					open_s = supabase.table("sessions").select("id").eq("user_id", user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute()
+					if open_s.data and open_s.data[0]:
+						supabase.table("sessions").update({"status": "closed", "profit": parsed.get("profit"), "closed_at": "now()"}).eq("id", open_s.data[0]["id"]).execute()
+				except:
+					pass
+			return reply, parsed, session
+		eval_data = ""
+		if parsed.get("hand"): eval_data += f"Hand: {parsed['hand']}. "
+		if parsed.get("tier"): eval_data += f"Tier: {parsed['tier']}. "
+		if parsed.get("position"): eval_data += f"Position: {parsed['position']}. "
+		if parsed.get("action"): eval_data += f"Strategy: {parsed['action']}. "
+		if parsed.get("hand_rank"): eval_data += f"Hand rank: {parsed['hand_rank']}. Score: {parsed.get('score', '')}. "
+		if not eval_data: eval_data = json.dumps(parsed)
+		clean = [
+			{"role": "system", "content": "You are a poker coach. Respond to the player based on this data - 2-3 short sentences. No tool calls."},
+			{"role": "user", "content": f"Asked: {user_input}\nData: {eval_data.strip()}"}
+		]
+		try:
+			second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
+			return second.choices[0].message.content, parsed, session
+		except Exception as e:
+			return format_track(parsed, session), parsed, session
 	return msg.content, parsed, session
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
@@ -213,11 +229,12 @@ async def chat_endpoint(req: Request):
 	reply, parsed, session = run_pipeline(user_input, mode, user_id)
 	if user_id:
 		try:
+			session_id = get_or_create_session(user_id) if mode == "track" else None
 			row_hand = parsed.get("hand") or (session.get("hand") if session else None)
-			row = {"user_id": user_id, "input": user_input, "reply": reply, "hand": row_hand, "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}
+			row = {"user_id": user_id, "input": user_input, "reply": reply, "hand": row_hand, "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount"), "session_id": session_id}
 			if mode == "coach" and parsed.get("tier"):
 				row["tier"] = parsed["tier"]
-			if session and session.get("hand"):
+			if session and session.get("hand") and parsed.get("hand") == session.get("hand"):
 				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
 				if last.data and last.data[0]:
 					update = {"reply": reply}
@@ -232,6 +249,22 @@ async def chat_endpoint(req: Request):
 		except Exception as e:
 			reply += f" (log error: {str(e)})"
 	return {"reply": reply, "parsed": parsed}
+
+@app.get("/api/sessions")
+async def sessions_endpoint(req: Request):
+	auth_header = req.headers.get("authorization", "")
+	if not auth_header.startswith("Bearer "):
+		return {"error": "unauthorized"}
+	token = auth_header[7:]
+	try:
+		resp = supabase.auth.get_user(token)
+		if not resp or not resp.user:
+			return {"error": "unauthorized"}
+		user_id = resp.user.id
+	except:
+		return {"error": "unauthorized"}
+	result = supabase.table("sessions").select("id, created_at, closed_at, profit, status").eq("user_id", user_id).order("created_at", desc=True).execute()
+	return {"sessions": result.data}
 
 @app.post("/api/result")
 async def result_endpoint(req: Request):
