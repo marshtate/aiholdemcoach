@@ -1,10 +1,19 @@
 import os
 import json
+import importlib
+from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from treys import Card, Evaluator
-from supabase import create_client, Client
+
+try:
+	_supabase = importlib.import_module("supabase")
+	create_client = _supabase.create_client
+	Client = Any
+except ImportError:
+	create_client = None
+	Client = Any
 
 app = FastAPI()
 
@@ -16,7 +25,9 @@ allow_headers=["*"],)
 
 try:
 	groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-	supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
+	if create_client is None:
+		raise ImportError("The 'supabase' package is required")
+	supabase = create_client(os.environ.get("SUPABASE_URL"),
 	os.environ.get("SUPABASE_SERVICE_KEY"))
 	evaluator = Evaluator()
 	startup_ok = True
@@ -70,16 +81,7 @@ def preflop_advice(card1, card2, position="BTN"):
 	return json.dumps({"hand": hand, "tier": TIER_NAMES[tier], "position": pos, "action": action})
 
 def log_hand(hand, position=None, action=None, result=None, amount=None):
-	tier_num = None
-	if len(hand) == 2 or len(hand) == 3:
-		try:
-			c1 = hand[0] + "h"
-			c2 = hand[1] + "d"
-			tier_num = get_hand_tier(to_canonical(c1, c2))
-		except Exception:
-			pass
-	tier_name = TIER_NAMES.get(tier_num, None) if tier_num else None
-	return json.dumps({"hand": hand, "tier": tier_name, "position": position, "action": action, "result": result, "amount": amount})
+	return json.dumps({"hand": hand, "position": position, "action": action, "result": result, "amount": amount})
 
 tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards. Use when the player provides a board.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
@@ -88,7 +90,6 @@ tools = [
 ]
 
 available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand}
-
 def get_session_context(user_id):
 	try:
 		result = supabase.table("messages").select("input, hand, position").eq("user_id", user_id).order("created_at", desc=True).limit(10).execute()
@@ -108,93 +109,94 @@ def get_session_context(user_id):
 		pass
 	return None
 
+coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand to compute real math. When they describe ONLY hole cards with no board, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."
+
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond ONLY with: 'Logged - [hand], [action if any], [result if any], [amount if any].' No advice. No strategy. No quality judgment - never say if a hand is good, playable, strong, or trash."
+
 def build_system(mode, session=None):
-	if mode == "track":
-		base = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much. Call log_hand with everything you find. Respond in one line like: 'Logged - [hand], [action], [result if any], [amount if any].' No advice. No strategy."
-	else:
-		base = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand to compute real math. When a player describes ONLY hole cards with no board, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting you from the table."
+	base = track_system if mode == "track" else coach_system
 	if session and session.get("hand"):
 		hand = session["hand"]
 		pos = session.get("position", "")
 		prev = session.get("prev_input", "")
 		streets = session.get("streets", [])
-		base += f" CONTEXT - this player is holding {hand}"
-		if pos:
-			base += f" from {pos}"
-		base += f". their original message was '{prev}'."
-		if streets:
-			for s in streets:
-				if s:
-					base += f" they then said: '{s}'."
-		base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
+		if mode == "coach":
+			base += f" CONTEXT - this player is holding {hand}"
+			if pos:
+				base += f" from {pos}"
+			base += f". their original message was '{prev}'."
+			if streets:
+				for s in streets:
+					if s:
+						base += f" they then said: '{s}'."
+			base += " Their new message is a continuation of this same hand. If they describe any board or street, use evaluate_poker_hand with their hole cards plus ALL cards mentioned across these messages - the flop, turn, river - combined."
+		else:
+			base += f" CONTEXT - this player is holding {hand}"
+			if pos:
+				base += f" from {pos}"
+			base += ". Their new message is about this same hand. Call log_hand with this hand and whatever they say about it - a board, an action, a result, an amount. If they say they won or lost, include result. If they say an amount, include it."
 	return {"role": "system", "content": base}
-def run_pipeline(user_input, mode, user_id=None):
-    session = None
-    if user_id:
-        session = get_session_context(user_id)
-    system_msg = build_system(mode, session)
-    messages = [system_msg, {"role": "user", "content": user_input}]
-    try:
-        response = groq_client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-        )
-    except Exception as e:
-        return f"AI error: {str(e)}", {}, session
 
-    msg = response.choices[0].message
-    parsed = {}
-    if msg.tool_calls:
-        messages.append(msg)
-        for tc in msg.tool_calls:
-            fn = available.get(tc.function.name)
-            try:
-                args = json.loads(tc.function.arguments)
-                result = fn(**args) if fn else "Not found."
-            except Exception as e:
-                result = json.dumps({"error": f"Tool failed: {str(e)}. Try cards like Ah Kd or Jh 4d."})
-            if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
-                try:
-                    parsed = json.loads(result)
-                except Exception:
-                    pass
-            result_text = ""
-            if parsed.get("hand"):
-                result_text += f"Hand: {parsed['hand']}. "
-            if parsed.get("tier"):
-                result_text += f"Tier: {parsed['tier']}. "
-            if parsed.get("position"):
-                result_text += f"Position: {parsed['position']}. "
-            if parsed.get("action"):
-                result_text += f"Action: {parsed['action']}. "
-            if parsed.get("hand_rank"):
-                result_text += f"Hand rank: {parsed['hand_rank']}. Score: {parsed.get('score', '')}. "
-            if parsed.get("result"):
-                result_text += f"Result: {parsed['result']}. "
-            if parsed.get("amount"):
-                result_text += f"Amount: {parsed['amount']}. "
-            if not result_text:
-                result_text = json.dumps(parsed)
-            clean = [
-                {"role": "system", "content": "Based on this data, respond to the player briefly and friendly. No tool calls." if mode == "coach" else "Based on this data, give a one-line log summary. No advice, no tool calls."},
-                {"role": "user", "content": user_input},
-                {"role": "assistant", "content": result_text.strip()}
-            ]
-            try:
-                second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
-                return second.choices[0].message.content, parsed, session
-            except Exception as e:
-                return f"AI response error: {str(e)}", parsed, session
-    return msg.content, parsed, session
-@ app.post("/api/chat")
+def format_track(parsed, session=None):
+	hand = parsed.get("hand") or (session.get("hand") if session else None) or "?"
+	parts = [hand]
+	if parsed.get("position"): parts.append(parsed["position"])
+	if parsed.get("action"): parts.append(parsed["action"])
+	if parsed.get("result"): parts.append("won" if parsed["result"].lower() == "won" else "lost")
+	if parsed.get("amount"): parts.append(f"${parsed['amount']}")
+	return "Logged - " + ", ".join(parts) + "."
+def run_pipeline(user_input, mode, user_id=None):
+	session = None
+	if user_id:
+		session = get_session_context(user_id)
+	system_msg = build_system(mode, session)
+	messages = [system_msg, {"role": "user", "content": user_input}]
+	try:
+		response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
+	except Exception as e:
+		return f"AI error: {str(e)}", {}, session
+	msg = response.choices[0].message
+	parsed = {}
+	if msg.tool_calls:
+		messages.append(msg)
+		for tc in msg.tool_calls:
+			fn = available.get(tc.function.name)
+			try:
+				args = json.loads(tc.function.arguments)
+				result = fn(**args) if fn else "Not found."
+			except Exception as e:
+				result = json.dumps({"error": f"Tool failed: {str(e)}"})
+			messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
+			if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand"):
+				try: parsed = json.loads(result)
+				except: pass
+	if mode == "track":
+		reply = format_track(parsed, session)
+		return reply, parsed, session
+	eval_data = ""
+	if parsed.get("hand"): eval_data += f"Hand: {parsed['hand']}. "
+	if parsed.get("tier"): eval_data += f"Tier: {parsed['tier']}. "
+	if parsed.get("position"): eval_data += f"Position: {parsed['position']}. "
+	if parsed.get("action"): eval_data += f"Strategy: {parsed['action']}. "
+	if parsed.get("hand_rank"): eval_data += f"Hand rank: {parsed['hand_rank']}. Score: {parsed.get('score', '')}. "
+	if not eval_data: eval_data = json.dumps(parsed)
+	clean = [
+		{"role": "system", "content": "You are a poker coach. The player asked about their hand, and this is the data. Respond in 2-3 short friendly sentences. No tool calls."},
+		{"role": "user", "content": f"Player asked: {user_input}\n\nData: {eval_data.strip()}"}
+	]
+	try:
+		second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
+		return second.choices[0].message.content, parsed, session
+	except Exception as e:
+		return format_track(parsed, session), parsed, session
+	return msg.content, parsed, session
+@app.post("/api/chat")
 async def chat_endpoint(req: Request):
 	if not startup_ok:
 		return {"reply": f"Startup failed: {startup_error}"}
 	try:
 		body = await req.json()
-	except Exception:
+	except:
 		return {"reply": "Could not read your message."}
 	user_input = body.get("message", "")
 	mode = body.get("mode", "coach")
@@ -206,26 +208,22 @@ async def chat_endpoint(req: Request):
 			resp = supabase.auth.get_user(token)
 			if resp and resp.user:
 				user_id = resp.user.id
-		except Exception:
+		except:
 			pass
 	reply, parsed, session = run_pipeline(user_input, mode, user_id)
 	if user_id:
 		try:
-			row_hand = parsed.get("hand")
-			if not row_hand and session and session.get("hand"):
-				row_hand = session["hand"]
-			row = {"user_id": user_id, "input": user_input, "reply": reply, "hand": row_hand, "tier": parsed.get("tier"), "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}
-			if parsed.get("hand_rank"):
-				row["hand_rank"] = parsed["hand_rank"]
-			row["score"] = parsed.get("score")
-			if session and session.get("hand") and parsed.get("hand_rank"):
+			row_hand = parsed.get("hand") or (session.get("hand") if session else None)
+			row = {"user_id": user_id, "input": user_input, "reply": reply, "hand": row_hand, "position": parsed.get("position"), "player_action": parsed.get("action"), "result": parsed.get("result"), "amount": parsed.get("amount")}
+			if mode == "coach" and parsed.get("tier"):
+				row["tier"] = parsed["tier"]
+			if session and session.get("hand"):
 				last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
 				if last.data and last.data[0]:
 					update = {"reply": reply}
-					if parsed.get("hand_rank"):
-						update["hand_rank"] = parsed["hand_rank"]
-					if parsed.get("score"):
-						update["score"] = parsed["score"]
+					if parsed.get("action"): update["player_action"] = parsed["action"]
+					if parsed.get("result"): update["result"] = parsed["result"]
+					if parsed.get("amount"): update["amount"] = parsed["amount"]
 					supabase.table("messages").update(update).eq("id", last.data[0]["id"]).execute()
 				else:
 					supabase.table("messages").insert(row).execute()
