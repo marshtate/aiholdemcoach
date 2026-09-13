@@ -115,7 +115,7 @@ def get_session_context(user_id):
 
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they tell you their total for the night - profit or loss - call close_session with that number, positive for profit, negative for loss. Respond ONLY with: 'Session closed - [profit/loss].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they tell you their total for the night - profit or loss - call close_session with that number, positive for profit, negative for loss. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - close their session with profit 0. Respond ONLY with: 'Session closed - [profit/loss].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
