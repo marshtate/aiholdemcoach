@@ -25,9 +25,21 @@ window.visualViewport.addEventListener('scroll', fixHeader);
 -webkit-overflow-scrolling: touch;
 overscroll-behavior-y: contain;
 }
+body {
+position: fixed;
+top: 0;
+left: 0;
+width: 100%;
+height: 100%;
+height: 100dvh;
+overflow: hidden;
+}
+input, textarea, select {
+font-size: 16px;
+}
 </style>
 </head>
-<body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-slate-900 text-slate-100 font-sans">
+<body class="flex flex-col max-w-xl mx-auto shadow-2xl bg-slate-900 text-slate-100 font-sans">
 <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
 <div class="p-3 flex items-center justify-between">
 <div class="flex items-center space-x-3">
