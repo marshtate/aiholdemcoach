@@ -458,18 +458,6 @@ cachedHistory = null;
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
 finally { input.disabled = false; sendBtn.disabled = false; input.focus(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
 }
-
-const header = document.querySelector('header');
-window.addEventListener('scroll', function() {
-const y = window.scrollY;
-header.style.transform = y > 0? `translateY(${y}px)`: '';
-});
-if (window.visualViewport) {
-window.visualViewport.addEventListener('resize', function() {
-const y = window.scrollY;
-header.style.transform = y > 0? `translateY(${y}px)`: '';
-});
-}
 </script>
 </body>
 </html>
