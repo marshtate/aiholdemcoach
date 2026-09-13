@@ -134,9 +134,9 @@ def build_system(mode, session=None):
 	elif session and session.get("hand") and mode == "track":
 		hand = session["hand"]
 		pos = session.get("position", "")
-		base += f" CONTEXT - this player is holding {hand}"
+		base += f" CONTEXT - you were told this player is holding {hand}"
 		if pos: base += f" from {pos}"
-		base += ". They're still on this hand. Call log_hand with this hand and whatever they say - a board, an action, a result. If they say they won or lost, include result."
+		base += ". If they're saying something about this same hand - a board, an action, won or lost - call log_hand with this hand, exactly as given. But if they state NEW hole cards - different cards from what you know - that is a brand new hand, NOT a continuation. Log EXACTLY what they typed - their exact notation - never change it, never alter suit or format."
 	return {"role": "system", "content": base}
 
 def format_track(parsed, session=None, closed=False):
