@@ -62,7 +62,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 </div>
 </main>
-<footer class="p-3 bg-black/90 border-t border-neutral-800 flex-shrink-0">
+<footer class="p-3 pb-16 bg-black/90 border-t border-neutral-800 flex-shrink-0">
 <form id="chat-form" class="flex items-center gap-2" onsubmit="sendMessage(event)">
 <input id="user-input" type="text" placeholder="Type your hand..." autocomplete="off" class="flex-1 bg-[#1a1a1a] text-gray-100 text-sm rounded-full px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800 transition placeholder-gray-500" />
 <button type="submit" id="send-btn" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white p-3 rounded-full transition shadow-md flex items-center justify-center disabled:opacity-50">
@@ -82,7 +82,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <p class="text-sm text-gray-500 text-center py-8">No data yet.</p>
 </div>
 </div>
-<nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 bg-black/90 border-t border-neutral-800 backdrop-blur flex justify-around py-2 pb-6 z-10">
+<nav id="bottom-nav" class="hidden fixed bottom-0 left-0 right-0 bg-black/90 border-t border-neutral-800 backdrop-blur flex justify-around py-2 pb-6 z-10">
 <button id="tab-home" class="flex flex-col items-center gap-0.5 py-1 px-3">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 nav-icon text-emerald-400"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 101.06-1.06l-8.689-8.69a2.25 2.25 0 00-3.182 0l-8.69 8.69a.75.75 0 001.061 1.06l8.69-8.69z"/><path d="M12 5.432l8.159 8.159c.03.03.06.058.091.086v6.198c0 1.035-.84 1.875-1.875 1.875H15.75a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-4.5a.75.75 0 00-.75.75V21a.75.75 0 01-.75.75H5.625a1.875 1.875 0 01-1.875-1.875v-6.198a2.29 2.29 0 00.091-.086L12 5.432z"/></svg>
 <span class="text-[10px] text-emerald-400">Home</span>
@@ -114,6 +114,7 @@ let currentMode = 'coach';
 let cachedHistory = null;
 
 function showApp() {
+document.getElementById('bottom-nav').classList.remove('hidden');
 authScreen.classList.add('hidden');
 appScreen.classList.remove('hidden');
 logoutBtn.classList.remove('hidden');
@@ -123,6 +124,7 @@ checkSession();
 loadHome();
 }
 function showAuth() {
+document.getElementById('bottom-nav').classList.add('hidden');
 authScreen.classList.remove('hidden');
 appScreen.classList.add('hidden');
 logoutBtn.classList.add('hidden');
@@ -197,9 +199,23 @@ const historyView = document.getElementById('history-view');
 const statsView = document.getElementById('stats-view');
 
 function setActiveTab(active) {
-[tabHome, tabChat, tabHistory, tabStats].forEach(t => t.className = t.className.replace('tab-active', 'tab-inactive'));
-homeView.classList.add('hidden'); chatView.classList.add('hidden'); historyView.classList.add('hidden'); statsView.classList.add('hidden');
-active.className = active.className.replace('tab-inactive', 'tab-active');
+tabs = [tabHome, tabChat, tabHistory, tabStats];
+views = [homeView, chatView, historyView, statsView];
+tabs.forEach(t => {
+const icon = t.querySelector('.nav-icon');
+const label = t.querySelector('span');
+icon.classList.remove('text-emerald-400'); icon.classList.add('text-gray-500');
+label.classList.remove('text-emerald-400'); label.classList.add('text-gray-500');
+});
+views.forEach(v => v.classList.add('hidden'));
+const aIcon = active.querySelector('.nav-icon');
+const aLabel = active.querySelector('span');
+aIcon.classList.remove('text-gray-500'); aIcon.classList.add('text-emerald-400');
+aLabel.classList.remove('text-gray-500'); aLabel.classList.add('text-emerald-400');
+if (active === tabHome) homeView.classList.remove('hidden');
+if (active === tabChat) chatView.classList.remove('hidden');
+if (active === tabHistory) historyView.classList.remove('hidden');
+if (active === tabStats) statsView.classList.remove('hidden');
 }
 tabHome.addEventListener('click', () => { setActiveTab(tabHome); homeView.classList.remove('hidden'); loadHome(); });
 tabChat.addEventListener('click', () => { setActiveTab(tabChat); chatView.classList.remove('hidden'); });
