@@ -9,14 +9,14 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
 const header = document.querySelector('header');
-if (window.visualViewport) {
-function fixHeader() {
-const offset = window.visualViewport.offsetTop;
-header.style.transform = offset > 0? `translateY(${offset}px)`: '';
-}
-window.visualViewport.addEventListener('resize', fixHeader);
-window.visualViewport.addEventListener('scroll', fixHeader);
-}
+window.addEventListener('scroll', function() {
+const y = window.scrollY;
+header.style.transform = y > 0? `translateY(${y}px)`: '';
+});
+window.visualViewport && window.visualViewport.addEventListener('resize', function() {
+const y = window.scrollY;
+header.style.transform = y > 0? `translateY(${y}px)`: '';
+});
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }.mode-active { background: #4f46e5; color: white; }.mode-inactive { background: #1e293b; color: #94a3b8; }.bar { height: 6px; border-radius: 3px; transition: width 0.4s ease; }.pulse-green { animation: pgreen 2s infinite; }
