@@ -10,6 +10,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>.tab-active { color: #818cf8; border-bottom: 2px solid #818cf8; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #dc2626; }.tier-strong { background: #ea580c; }.tier-playable { background: #ca8a04; }.tier-speculative { background: #2563eb; }.tier-trash { background: #64748b; }.mode-active { background: #4f46e5; color: white; }.mode-inactive { background: #1e293b; color: #94a3b8; }.bar { height: 6px; border-radius: 3px; transition: width 0.4s ease; }.pulse-green { animation: pgreen 2s infinite; }
 @keyframes pgreen { 0%,100%{opacity:1} 50%{opacity:0.5} }
+#chatbox {
+-webkit-overflow-scrolling: touch;
+overscroll-behavior-y: contain;
+}
 </style>
 </head>
 <body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-slate-900 text-slate-100 font-sans">
@@ -52,7 +56,7 @@
 <button id="mode-track-btn" class="flex-1 text-xs font-semibold py-2 rounded-lg mode-inactive transition">Track</button>
 </div>
 <div id="mode-label" class="px-4 pt-2 pb-1"><p class="text-xs text-slate-500">Get real strategy on your hands.</p></div>
-<main id="chatbox" class="flex-1 overflow-y-auto p-4 space-y-4">
+<main id="chatbox" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900">
 <div class="flex items-start">
 <div class="bg-slate-800 text-slate-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">
 Send me any hand - your cards, the board, your position - and I'll give you a real read.
@@ -384,7 +388,7 @@ cachedHistory = null;
 cachedHistory = null;
 }
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
-finally { input.disabled = false; sendBtn.disabled = false; input.focus(); chatbox.scrollTop = chatbox.scrollHeight; }
+finally { input.disabled = false; sendBtn.disabled = false; input.focus(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
 }
 </script>
 </body>
