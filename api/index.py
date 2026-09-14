@@ -621,7 +621,13 @@ async def discord_link(req: Request):
             "redirect_uri": redirect_uri,
         }).encode()
         treq = urllib.request.Request("https://discord.com/api/oauth2/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded"})
-        tokens = json.loads(urllib.request.urlopen(treq, timeout=10).read().decode())
+        try:
+            tres = urllib.request.urlopen(treq, timeout=10)
+        except urllib.error.HTTPError as http_exc:
+            detail = http_exc.read().decode(errors="replace")[:300]
+            discord_ping(f"discord link token exchange {http_exc.code}: {detail}")
+            return {"error": f"Discord rejected the code ({http_exc.code}): {detail}"}
+        tokens = json.loads(tres.read().decode())
         if not tokens.get("access_token"):
             return {"error": "Could not exchange code."}
         mreq = urllib.request.Request("https://discord.com/api/v10/users/@me", headers={"Authorization": "Bearer " + tokens["access_token"]})
@@ -635,7 +641,7 @@ async def discord_link(req: Request):
         rel.insert({"user_id": uid, "discord_id": discord_id, "discord_username": username}).execute()
         return {"ok": True, "username": username}
     except Exception as exc:
-        discord_ping(f"discord link: {exc}")
+        discord_ping(f"discord link exception: {exc}")
         return {"error": "Discord linking failed."}
 
 @app.post("/api/discord/share")
