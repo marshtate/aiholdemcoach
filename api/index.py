@@ -99,7 +99,7 @@ def fmt_amount(v, units="dollars"):
 		return f"{int(f)} chips"
 	return f"${v}"
 
-def log_hand(hand, position=None, action=None, result=None, amount=None, hands=None):
+def log_hand(hand=None, position=None, action=None, result=None, amount=None, hands=None):
 	if hands:
 		row0 = hands[0]
 		return json.dumps({"hands": hands, "hand": row0.get("hand"), "position": row0.get("position"), "action": row0.get("action"), "result": row0.get("result"), "amount": row0.get("amount")})
