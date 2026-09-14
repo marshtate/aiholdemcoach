@@ -620,7 +620,7 @@ async def discord_link(req: Request):
             "code": code,
             "redirect_uri": redirect_uri,
         }).encode()
-        treq = urllib.request.Request("https://discord.com/api/oauth2/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        treq = urllib.request.Request("https://discord.com/api/oauth2/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"})
         try:
             tres = urllib.request.urlopen(treq, timeout=10)
         except urllib.error.HTTPError as http_exc:
@@ -630,7 +630,7 @@ async def discord_link(req: Request):
         tokens = json.loads(tres.read().decode())
         if not tokens.get("access_token"):
             return {"error": "Could not exchange code."}
-        mreq = urllib.request.Request("https://discord.com/api/v10/users/@me", headers={"Authorization": "Bearer " + tokens["access_token"]})
+        mreq = urllib.request.Request("https://discord.com/api/v10/users/@me", headers={"Authorization": "Bearer " + tokens["access_token"], "User-Agent": "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"})
         me = json.loads(urllib.request.urlopen(mreq, timeout=10).read().decode())
         discord_id = me.get("id")
         if not discord_id:
