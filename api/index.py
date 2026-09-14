@@ -153,7 +153,7 @@ def get_session_context(user_id):
     return None
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. Never drop a result or amount the player mentions. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
@@ -172,9 +172,9 @@ def build_system(mode, session=None):
 	elif session and session.get("hand") and mode == "track":
 		hand = session["hand"]
 		pos = session.get("position", "")
-		base += f" CONTEXT - you were told this player is holding {hand}"
+		base += f" CONTEXT - an earlier hand this player logged was {hand}"
 		if pos: base += f" from {pos}"
-		base += ". If they're saying something about this same hand - a board, an action, won or lost - call log_hand with this hand, exactly as given. But if they state NEW hole cards - different cards from what you know - that is a brand new hand, NOT a continuation. Log EXACTLY what they typed - their exact notation - never change it, never alter suit or format."
+		base += f". Only reuse {hand} when the player's message REPEATS it, or clearly continues that exact hand without naming any different cards. CRITICAL RULES: (1) If the message names ANY hole cards - e.g. AKo, 77, TT, QJ, 72s - those are NEW hands and you MUST log exactly those cards - never {hand} for them. (2) If several different hands are mentioned, log EVERY one in the hands array - never skip any. (3) Log every result and amount the player mentions next to a hand. (4) When new cards are named, base your log ENTIRELY on those cards and ignore {hand}."
 	return {"role": "system", "content": base}
 
 def format_track(parsed, session=None, closed=False, logged_hands=None, units="dollars"):
@@ -412,7 +412,10 @@ async def chat_endpoint(req: Request):
                     if mode == "coach" and bh.get("tier"):
                         row["tier"] = bh["tier"]
                     if single and prev_hand and row_hand == prev_hand:
-                        last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", prev_hand).order("created_at", desc=True).limit(1).execute()
+                        q = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", prev_hand)
+                        if mode == "track" and session_id:
+                            q = q.eq("session_id", session_id)
+                        last = q.order("created_at", desc=True).limit(1).execute()
                         if last.data and last.data[0]:
                             update = {"reply": reply}
                             if bh.get("action"):
@@ -491,7 +494,7 @@ async def history_endpoint(req: Request):
         result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
         return {"history": result.data}
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": "unauthorized"}
 
 def auth_user_id(req):
     auth_header = req.headers.get("authorization", "")
