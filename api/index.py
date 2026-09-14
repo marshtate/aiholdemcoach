@@ -149,7 +149,7 @@ def run_pipeline(user_input, mode, user_id=None):
     try:
         response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
     except Exception as e:
-        return f"AI error: {str(e)}", {}, session, False
+        return f"AI error: {str(e)}", {}, session, False, False
     msg = response.choices[0].message
     parsed = {}
     tool_called = False
@@ -181,7 +181,7 @@ def run_pipeline(user_input, mode, user_id=None):
                         supabase.table("sessions").update({"status": "closed", "profit": parsed.get("profit"), "closed_at": "now()"}).eq("id", open_s.data[0]["id"]).execute()
                 except:
                     pass
-            return reply, parsed, session, tool_called
+            return reply, parsed, session, tool_called, closed
     eval_data = ""
     if parsed.get("hand"):
         eval_data += f"Hand: {parsed['hand']}. "
@@ -201,10 +201,10 @@ def run_pipeline(user_input, mode, user_id=None):
     ]
     try:
         second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
-        return second.choices[0].message.content, parsed, session, tool_called
+        return second.choices[0].message.content, parsed, session, tool_called, False
     except Exception:
-        return format_track(parsed, session), parsed, session, tool_called
-    return msg.content, parsed, session, tool_called
+        return format_track(parsed, session), parsed, session, tool_called, False
+    return msg.content, parsed, session, tool_called, False
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
     if not startup_ok:
@@ -225,8 +225,8 @@ async def chat_endpoint(req: Request):
                 user_id = resp.user.id
         except:
             pass
-    reply, parsed, session, tool_called = run_pipeline(user_input, mode, user_id)
-    if user_id and tool_called:
+    reply, parsed, session, tool_called, closed = run_pipeline(user_input, mode, user_id)
+    if user_id and tool_called and not closed:
         try:
             session_id = get_or_create_session(user_id) if mode == "track" else None
             row_hand = parsed.get("hand") or (session.get("hand") if session else None)
