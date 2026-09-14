@@ -119,7 +119,7 @@ def get_session_context(user_id):
     return None
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with a dollar amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - close their session with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with a dollar amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
@@ -212,7 +212,12 @@ def run_pipeline(user_input, mode, user_id=None):
                         row = {"status": "closed", "profit": parsed.get("profit"), "closed_at": "now()"}
                         if cashout is not None:
                             row["cashout"] = cashout
-                        supabase.table("sessions").update(row).eq("id", sid).execute()
+                        try:
+                            supabase.table("sessions").update(row).eq("id", sid).execute()
+                        except:
+                            if "cashout" in row:
+                                del row["cashout"]
+                                supabase.table("sessions").update(row).eq("id", sid).execute()
                 except:
                     pass
             reply = format_track(parsed, session, closed)
