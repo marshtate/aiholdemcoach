@@ -317,7 +317,7 @@ def recap_turn(user_input, user_id, session_id):
             if not sess:
                 return "No completed session to recap yet.", None
         sid = sess["id"]
-        hr = supabase.table("messages").select("hand, position, player_action, result, amount, input, created_at").eq("session_id", sid).eq("user_id", user_id).order("created_at", asc=True).execute()
+        hr = supabase.table("messages").select("hand, position, player_action, result, amount, input, created_at").eq("session_id", sid).eq("user_id", user_id).order("created_at", desc=False).execute()
         hands = [h for h in (hr.data or []) if h.get("hand")][:30]
         if not hands:
             return "That session has no logged hands to recap yet.", sid
@@ -342,7 +342,7 @@ def recap_turn(user_input, user_id, session_id):
                   "short verdict plus 1-2 concrete things to fix. Then answer follow-ups about these hands in 2-3 short "
                   "sentences. Never log or save anything - this is conversation only.\n\n"
                   f"SESSION\n{summary}\n\nHANDS PLAYED\n{hand_text}")
-        hist = supabase.table("recap_messages").select("role, content").eq("session_id", sid).eq("user_id", user_id).order("created_at", asc=True).limit(40).execute()
+        hist = supabase.table("recap_messages").select("role, content").eq("session_id", sid).eq("user_id", user_id).order("created_at", desc=False).limit(40).execute()
         msgs = [{"role": "system", "content": system}]
         for m in (hist.data or []):
             msgs.append({"role": m["role"], "content": m["content"]})
@@ -564,8 +564,8 @@ async def session_detail(req: Request):
         sess = sres.data[0] if (sres.data and sres.data[0]) else None
         if not sess:
             return {"error": "not found"}
-        hands = supabase.table("messages").select("id, hand, position, player_action, result, amount, created_at").eq("session_id", sid).order("created_at", asc=True).execute()
-        buyins = supabase.table("buyins").select("amount, created_at").eq("session_id", sid).order("created_at", asc=True).execute()
+        hands = supabase.table("messages").select("id, hand, position, player_action, result, amount, created_at").eq("session_id", sid).order("created_at", desc=False).execute()
+        buyins = supabase.table("buyins").select("amount, created_at").eq("session_id", sid).order("created_at", desc=False).execute()
         sess["hands"] = hands.data or []
         sess["buyin_list"] = buyins.data or []
         sess["buyins_total"] = session_buyin_total(sid)
