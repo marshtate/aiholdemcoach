@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-black">
+<html lang="en" class="h-full bg-black" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -20,6 +20,33 @@
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 #chat-footer.kb-open { padding-bottom: calc(env(safe-area-inset-bottom) + 12px) !important; }
 input, textarea, select { font-size: 16px; }
+html[data-theme="light"] { color-scheme: light; }
+html[data-theme="light"] body, html[data-theme="light"] .bg-black { background-color: #f4f4f5; }
+html[data-theme="light"] .bg-black\/70 { background-color: rgba(255, 255, 255, 0.75); }
+html[data-theme="light"] .bg-black\/80 { background-color: rgba(255, 255, 255, 0.85); }
+html[data-theme="light"] .bg-black\/90 { background-color: rgba(255, 255, 255, 0.9); }
+html[data-theme="light"] .bg-black\/95 { background-color: rgba(250, 250, 250, 0.97); }
+html[data-theme="light"] .bg-\[\#1a1a1a\] { background-color: #ffffff; }
+html[data-theme="light"] .bg-neutral-700 { background-color: #d4d4d8; }
+html[data-theme="light"] .bg-neutral-800 { background-color: #e4e4e7; }
+html[data-theme="light"] .bg-neutral-900\/60 { background-color: rgba(24, 24, 27, 0.05); }
+html[data-theme="light"] .border-neutral-700 { border-color: #d4d4d8; }
+html[data-theme="light"] .border-neutral-800 { border-color: #e4e4e7; }
+html[data-theme="light"] .border-neutral-800\/60, html[data-theme="light"] .border-neutral-800\/80 { border-color: #d4d4d8; }
+html[data-theme="light"] .bg-emerald-900\/30 { background-color: rgba(209, 250, 229, 0.8); }
+html[data-theme="light"] .border-emerald-800 { border-color: #34d399; }
+html[data-theme="light"] .bg-purple-900\/40, html[data-theme="light"] .bg-purple-900\/30 { background-color: rgba(221, 214, 254, 0.9); }
+html[data-theme="light"] .border-purple-800 { border-color: #a78bfa; }
+html[data-theme="light"] .text-gray-100 { color: #18181b; }
+html[data-theme="light"] .text-gray-200 { color: #27272a; }
+html[data-theme="light"] .text-gray-300 { color: #3f3f46; }
+html[data-theme="light"] .text-gray-400 { color: #52525b; }
+html[data-theme="light"] .text-gray-500 { color: #71717a; }
+html[data-theme="light"] .text-gray-600 { color: #9ca3af; }
+html[data-theme="light"] .text-emerald-400 { color: #059669; }
+html[data-theme="light"] .tab-active { color: #059669; border-bottom-color: #059669; }
+html[data-theme="light"] .mode-inactive { color: #52525b; }
+html[data-theme="light"] .mode-inactive:hover { color: #1e293b; }
 </style>
 </head>
 <body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-black text-gray-100 font-sans">
@@ -36,6 +63,9 @@ input, textarea, select { font-size: 16px; }
 <h1 class="font-semibold text-base tracking-tight text-gray-100">AI Holdem Coach</h1>
 </div>
 <button id="logout-btn" class="hidden text-xs text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded-full border border-neutral-800 hover:border-neutral-700 transition">Sign out</button>
+<button id="settings-btn" class="hidden text-gray-400 hover:text-gray-200 p-1.5 rounded-full border border-neutral-800 hover:border-neutral-700 transition" aria-label="Settings">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M11.078 2.25c-.917 0-1.699.663-1.85 1.567L9.05 4.889c-.02.12-.115.26-.297.348a7.493 7.493 0 00-.986.57c-.166.115-.334.126-.45.083L6.3 5.508a1.875 1.875 0 00-2.282.819l-.922 1.597a1.875 1.875 0 00.432 2.385l.84.692c.095.078.17.229.154.43a7.598 7.598 0 000 1.139c.015.201-.059.352-.153.43l-.841.692a1.875 1.875 0 00-.432 2.385l.922 1.597a1.875 1.875 0 002.282.819l1.019-.382c.115-.043.283-.031.45.082.312.214.641.405.985.57.182.088.277.228.297.35l.178 1.07c.15.904.932 1.567 1.85 1.567h1.844c.916 0 1.699-.663 1.85-1.567l.178-1.07c.02-.121.115-.262.297-.349a7.486 7.486 0 00.985-.57c.167-.114.335-.125.45-.083l1.02.382a1.875 1.875 0 002.28-.819l.923-1.597a1.875 1.875 0 00-.432-2.385l-.84-.692c-.095-.078-.17-.229-.154-.43a7.56 7.56 0 000-1.14c-.016-.2.059-.352.153-.43l.841-.692a1.875 1.875 0 00.432-2.384l-.922-1.598a1.875 1.875 0 00-2.282-.819l-1.02.382c-.114.043-.282.03-.449-.083a7.46 7.46 0 00-.985-.57c-.182-.088-.277-.228-.297-.35l-.178-1.07c-.15-.904-.933-1.567-1.85-1.567h-1.844zM12 15.75a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5z" clip-rule="evenodd"/></svg>
+</button>
 </div>
 <div id="mode-toggle-header" class="hidden gap-1 px-4 pb-3">
 <button id="mode-coach-btn" class="mode-btn flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-xl mode-active">
@@ -215,6 +245,35 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <span class="text-[10px] text-gray-500">Social</span>
 </button>
 </nav>
+
+<div id="settings-modal" class="hidden fixed inset-0 z-[70] p-6">
+<div id="settings-backdrop" class="absolute inset-0 bg-black/70" onclick="closeSettings()"></div>
+<div class="relative bg-[#1a1a1a] border border-neutral-800 rounded-2xl p-5 w-full max-w-sm space-y-5 shadow-2xl">
+<div class="flex items-center justify-between">
+<h2 class="font-semibold text-gray-100">Settings</h2>
+<button onclick="closeSettings()" class="text-gray-500 hover:text-gray-300 p-1" aria-label="Close settings">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 010-1.06z" clip-rule="evenodd"/></svg>
+</button>
+</div>
+<div>
+<p class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Theme</p>
+<div class="flex gap-1 bg-black rounded-xl p-1">
+<button id="theme-dark-btn" onclick="setTheme('dark')" class="mode-btn flex-1 text-xs font-semibold py-2 rounded-lg">Dark</button>
+<button id="theme-light-btn" onclick="setTheme('light')" class="mode-btn flex-1 text-xs font-semibold py-2 rounded-lg">Light</button>
+</div>
+</div>
+<div>
+<p class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">Hand units</p>
+<p class="text-[10px] text-gray-500 mb-2">How amounts are shown for logged hands.</p>
+<div class="flex gap-1 bg-black rounded-xl p-1">
+<button id="unit-dollars-btn" onclick="setUnits('dollars')" class="mode-btn flex-1 text-xs font-semibold py-2 rounded-lg">$</button>
+<button id="unit-bb-btn" onclick="setUnits('bb')" class="mode-btn flex-1 text-xs font-semibold py-2 rounded-lg">bb</button>
+<button id="unit-chips-btn" onclick="setUnits('chips')" class="mode-btn flex-1 text-xs font-semibold py-2 rounded-lg">chips</button>
+</div>
+</div>
+<p class="text-[10px] text-gray-600">Settings save automatically on this device.</p>
+</div>
+</div>
 
 <script src="/app.js"></script>
 </body>

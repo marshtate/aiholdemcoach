@@ -89,7 +89,20 @@ def preflop_advice(card1, card2, position="BTN"):
 	else: action = "Fold"
 	return json.dumps({"hand": hand, "tier": TIER_NAMES[tier], "position": pos, "action": action})
 
-def log_hand(hand, position=None, action=None, result=None, amount=None):
+def fmt_amount(v, units="dollars"):
+	if v is None:
+		return ""
+	if units == "bb":
+		return f"{v}bb"
+	if units == "chips":
+		f = float(v)
+		return f"{int(f)} chips"
+	return f"${v}"
+
+def log_hand(hand, position=None, action=None, result=None, amount=None, hands=None):
+	if hands:
+		row0 = hands[0]
+		return json.dumps({"hands": hands, "hand": row0.get("hand"), "position": row0.get("position"), "action": row0.get("action"), "result": row0.get("result"), "amount": row0.get("amount")})
 	return json.dumps({"hand": hand, "position": position, "action": action, "result": result, "amount": amount})
 
 def close_session(profit=None, cashout=None):
@@ -123,7 +136,7 @@ def session_buyin_total(session_id):
 tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
 {"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB."}}, "required": ["card1", "card2"]}}},
-{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ"}, "position": {"type": "string", "description": "Optional position"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount"}}, "required": ["hand"]}}},
+{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result. If the player's message contains MULTIPLE hands, call this tool ONCE PER HAND.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ"}, "position": {"type": "string", "description": "Optional position"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: amount won or lost"}, "hands": {"type": "array", "items": {"type": "object", "properties": {"hand": {"type": "string"}, "position": {"type": "string"}, "action": {"type": "string"}, "result": {"type": "string"}, "amount": {"type": "number"}}, "required": ["hand"]}, "description": "Rarely: a list of hands to log all at once"}}, "required": ["hand"]}}},
 {"type": "function", "function": {"name": "close_session", "description": "Close the player's session with either their total profit or loss, OR their cashout amount. If the player says they were up/down X, pass profit (positive for profit, negative for loss). If they say they cashed out X, pass cashout.", "parameters": {"type": "object", "properties": {"profit": {"type": "number", "description": "Total profit (positive) or loss (negative) in dollars"}, "cashout": {"type": "number", "description": "Total amount cashed out at the end of the session in dollars"}}, "required": []}}},
 {"type": "function", "function": {"name": "record_buyin", "description": "Record a buy-in or re-buy for the current session.", "parameters": {"type": "object", "properties": {"amount": {"type": "number", "description": "Dollar amount of this buy-in or re-buy"}}, "required": ["amount"]}}},
 ]
@@ -140,7 +153,7 @@ def get_session_context(user_id):
     return None
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with a dollar amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), call log_hand ONCE PER HAND so every hand gets logged, and never skip any. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
@@ -164,23 +177,33 @@ def build_system(mode, session=None):
 		base += ". If they're saying something about this same hand - a board, an action, won or lost - call log_hand with this hand, exactly as given. But if they state NEW hole cards - different cards from what you know - that is a brand new hand, NOT a continuation. Log EXACTLY what they typed - their exact notation - never change it, never alter suit or format."
 	return {"role": "system", "content": base}
 
-def format_track(parsed, session=None, closed=False):
+def format_track(parsed, session=None, closed=False, logged_hands=None, units="dollars"):
 	if parsed.get("buyin"):
-		return f"Bought in for ${parsed['amount']}."
+		return f"Bought in for {fmt_amount(parsed['amount'], units)}."
 	if closed and (parsed.get("profit") is not None or parsed.get("cashout") is not None):
 		if parsed.get("cashout") is not None and parsed.get("profit") is None:
-			return f"Session closed - cashed out ${parsed['cashout']}."
+			return f"Session closed - cashed out {fmt_amount(parsed['cashout'], units)}."
 		p = parsed.get("profit", 0)
-		extra = f" Cashed out ${parsed['cashout']}." if parsed.get("cashout") is not None else ""
+		extra = f" Cashed out {fmt_amount(parsed['cashout'], units)}." if parsed.get("cashout") is not None else ""
 		return f"Session closed - {'+' if p >= 0 else ''}{p}.{extra}"
+	if logged_hands:
+		out = []
+		for h in logged_hands:
+			parts = [h.get("hand") or "?"]
+			if h.get("position"): parts.append(h["position"])
+			if h.get("action"): parts.append(h["action"])
+			if h.get("result"): parts.append("won" if str(h["result"]).lower() in ("won", "win", "w") else "lost")
+			if h.get("amount") is not None: parts.append(fmt_amount(h["amount"], units))
+			out.append("Logged - " + ", ".join(parts))
+		return ". ".join(out) + "."
 	hand = parsed.get("hand") or (session.get("hand") if session else None) or "?"
 	parts = [hand]
 	if parsed.get("position"): parts.append(parsed["position"])
 	if parsed.get("action"): parts.append(parsed["action"])
-	if parsed.get("result"): parts.append("won" if parsed["result"].lower() in ("won", "win", "w") else "lost")
-	if parsed.get("amount"): parts.append(f"${parsed['amount']}")
+	if parsed.get("result"): parts.append("won" if str(parsed["result"]).lower() in ("won", "win", "w") else "lost")
+	if parsed.get("amount") is not None: parts.append(fmt_amount(parsed["amount"], units))
 	return "Logged - " + ", ".join(parts) + "."
-def run_pipeline(user_input, mode, user_id=None):
+def run_pipeline(user_input, mode, user_id=None, units="dollars"):
     session = None
     if user_id:
         session = get_session_context(user_id)
@@ -189,10 +212,11 @@ def run_pipeline(user_input, mode, user_id=None):
     try:
         response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
     except Exception as e:
-        return f"AI error: {str(e)}", {}, session, False, False
+        return f"AI error: {str(e)}", {}, session, False, False, []
     msg = response.choices[0].message
     parsed = {}
     tool_called = False
+    logged_hands = []
     if msg.tool_calls:
         tool_called = True
         messages.append(msg)
@@ -212,6 +236,15 @@ def run_pipeline(user_input, mode, user_id=None):
                     pass
                 if parsed.get("result") is not None:
                     parsed["result"] = "won" if str(parsed["result"]).lower() in ("won", "win", "w") else "lost"
+            if tc.function.name == "log_hand":
+                hs = parsed.get("hands")
+                if isinstance(hs, list) and hs:
+                    for h in hs:
+                        if h.get("result") is not None:
+                            h["result"] = "won" if str(h["result"]).lower() in ("won", "win", "w") else "lost"
+                        logged_hands.append(h)
+                elif parsed.get("hand"):
+                    logged_hands.append(parsed)
             if tc.function.name == "record_buyin" and mode == "track":
                 try:
                     sid = get_or_create_session(user_id)
@@ -246,8 +279,8 @@ def run_pipeline(user_input, mode, user_id=None):
                         credit_bankroll(user_id, parsed.get("profit"))
                 except Exception as exc:
                     discord_ping(f"close_session: {exc}")
-            reply = format_track(parsed, session, closed)
-            return reply, parsed, session, tool_called, closed
+            reply = format_track(parsed, session, closed, logged_hands, units)
+            return reply, parsed, session, tool_called, closed, logged_hands
     eval_data = ""
     if parsed.get("hand"):
         eval_data += f"Hand: {parsed['hand']}. "
@@ -267,10 +300,10 @@ def run_pipeline(user_input, mode, user_id=None):
     ]
     try:
         second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
-        return second.choices[0].message.content, parsed, session, tool_called, False
+        return second.choices[0].message.content, parsed, session, tool_called, False, logged_hands
     except Exception:
-        return format_track(parsed, session), parsed, session, tool_called, False
-    return msg.content, parsed, session, tool_called, False
+        return format_track(parsed, session), parsed, session, tool_called, False, logged_hands
+    return msg.content, parsed, session, tool_called, False, logged_hands
 def recap_turn(user_input, user_id, session_id):
     try:
         if session_id:
@@ -355,42 +388,45 @@ async def chat_endpoint(req: Request):
             return {"reply": "Sign in to recap a session."}
         reply, rid = recap_turn(user_input, user_id, body.get("session_id"))
         return {"reply": reply, "parsed": {}, "recap_session_id": rid}
-    reply, parsed, session, tool_called, closed = run_pipeline(user_input, mode, user_id)
+    reply, parsed, session, tool_called, closed, logged_hands = run_pipeline(user_input, mode, user_id, body.get("units", "dollars"))
     if user_id and tool_called and not closed and not parsed.get("buyin"):
-        try:
-            session_id = get_or_create_session(user_id) if mode == "track" else None
-            row_hand = parsed.get("hand") or (session.get("hand") if session else None)
-            row = {
-                "user_id": user_id,
-                "input": user_input,
-                "reply": reply,
-                "hand": row_hand,
-                "position": parsed.get("position"),
-                "player_action": parsed.get("action"),
-                "result": parsed.get("result"),
-                "amount": parsed.get("amount"),
-                "session_id": session_id,
-            }
-            if mode == "coach" and parsed.get("tier"):
-                row["tier"] = parsed["tier"]
-            if session and session.get("hand") and parsed.get("hand") == session.get("hand"):
-                last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", session["hand"]).order("created_at", desc=True).limit(1).execute()
-                if last.data and last.data[0]:
-                    update = {"reply": reply}
-                    if parsed.get("action"):
-                        update["player_action"] = parsed["action"]
-                    if parsed.get("result"):
-                        update["result"] = parsed["result"]
-                    if parsed.get("amount"):
-                        update["amount"] = parsed["amount"]
-                    supabase.table("messages").update(update).eq("id", last.data[0]["id"]).execute()
-                else:
+        batch = logged_hands if logged_hands else [parsed]
+        if any(b.get("hand") for b in batch):
+            try:
+                session_id = get_or_create_session(user_id) if mode == "track" else None
+                prev_hand = session.get("hand") if session else None
+                single = len(batch) == 1
+                for bh in batch:
+                    row_hand = bh.get("hand") or prev_hand
+                    row = {
+                        "user_id": user_id,
+                        "input": user_input,
+                        "reply": reply,
+                        "hand": row_hand,
+                        "position": bh.get("position"),
+                        "player_action": bh.get("action"),
+                        "result": bh.get("result"),
+                        "amount": bh.get("amount"),
+                        "session_id": session_id,
+                    }
+                    if mode == "coach" and bh.get("tier"):
+                        row["tier"] = bh["tier"]
+                    if single and prev_hand and row_hand == prev_hand:
+                        last = supabase.table("messages").select("id").eq("user_id", user_id).eq("hand", prev_hand).order("created_at", desc=True).limit(1).execute()
+                        if last.data and last.data[0]:
+                            update = {"reply": reply}
+                            if bh.get("action"):
+                                update["player_action"] = bh["action"]
+                            if bh.get("result"):
+                                update["result"] = bh["result"]
+                            if bh.get("amount") is not None:
+                                update["amount"] = bh["amount"]
+                            supabase.table("messages").update(update).eq("id", last.data[0]["id"]).execute()
+                            continue
                     supabase.table("messages").insert(row).execute()
-            else:
-                supabase.table("messages").insert(row).execute()
-        except Exception as e:
-            discord_ping(f"chat message insert: {e}")
-            reply += f" (log error: {str(e)})"
+            except Exception as e:
+                discord_ping(f"chat message insert: {e}")
+                reply += f" (log error: {str(e)})"
     return {"reply": reply, "parsed": parsed}
 
 @app.get("/api/sessions")

@@ -11,6 +11,55 @@ let currentMode = 'coach';
 let cachedHistory = null;
 let recapActive = false;
 let recapSessionId = null;
+const settingsBtn = document.getElementById('settings-btn');
+let currentTheme = localStorage.getItem('aihc_theme') || 'dark';
+let currentUnits = localStorage.getItem('aihc_units') || 'dollars';
+function seg(el, on) {
+if (!el) return;
+if (on) el.className = el.className.replace('mode-inactive', 'mode-active');
+else el.className = el.className.replace('mode-active', 'mode-inactive');
+}
+function refreshSettingsUI() {
+seg(document.getElementById('theme-dark-btn'), currentTheme === 'dark');
+seg(document.getElementById('theme-light-btn'), currentTheme === 'light');
+seg(document.getElementById('unit-dollars-btn'), currentUnits === 'dollars');
+seg(document.getElementById('unit-bb-btn'), currentUnits === 'bb');
+seg(document.getElementById('unit-chips-btn'), currentUnits === 'chips');
+}
+function applyTheme() {
+document.documentElement.setAttribute('data-theme', currentTheme);
+localStorage.setItem('aihc_theme', currentTheme);
+const meta = document.querySelector('meta[name="theme-color"]');
+if (meta) meta.setAttribute('content', currentTheme === 'light' ? '#f4f4f5' : '#000000');
+}
+function setTheme(t) { currentTheme = t; applyTheme(); refreshSettingsUI(); }
+function unitAmount(v) {
+if (v === null || v === undefined) return '';
+if (currentUnits === 'bb') return v.toFixed(2) + 'bb';
+if (currentUnits === 'chips') return Math.round(v) + ' chips';
+return '$' + v.toFixed(2);
+}
+function setUnits(u) {
+currentUnits = u;
+localStorage.setItem('aihc_units', u);
+refreshSettingsUI();
+renderQuickChips();
+if (cachedHistory) renderHandList();
+}
+function openSettings() {
+refreshSettingsUI();
+const m = document.getElementById('settings-modal');
+m.classList.remove('hidden');
+m.classList.add('flex', 'items-center', 'justify-center');
+}
+function closeSettings() {
+const m = document.getElementById('settings-modal');
+m.classList.add('hidden');
+m.classList.remove('flex', 'items-center', 'justify-center');
+}
+applyTheme();
+refreshSettingsUI();
+settingsBtn.addEventListener('click', openSettings);
 
 function showApp() {
 const splash = document.getElementById('splash');
@@ -20,6 +69,7 @@ appHeader.classList.remove('hidden');
 authScreen.classList.add('hidden');
 appScreen.classList.remove('hidden');
 logoutBtn.classList.remove('hidden');
+settingsBtn.classList.remove('hidden');
 checkSession();
 loadHome();
 showOnboarding();
@@ -32,6 +82,7 @@ appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
 appScreen.classList.add('hidden');
 logoutBtn.classList.add('hidden');
+settingsBtn.classList.add('hidden');
 modeToggle.classList.add('hidden');
 modeToggle.classList.remove('flex');
 }
@@ -107,6 +158,7 @@ appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
 appScreen.classList.add('hidden');
 logoutBtn.classList.add('hidden');
+settingsBtn.classList.add('hidden');
 modeToggle.classList.add('hidden');
 modeToggle.classList.remove('flex');
 document.getElementById('auth-form').classList.add('hidden');
@@ -176,17 +228,18 @@ document.getElementById('user-input').placeholder = currentMode === 'coach'? 'Ty
 renderQuickChips();
 refreshSessionBanner();
 }
-const chipDefs = [
-{ label: 'Won +$20', fill: 'Won $20' },
-{ label: 'Rebuy $5', fill: 'Bought in $5' },
-{ label: 'Rebuy $20', fill: 'Bought in $20' },
-{ label: 'Rebuy $100', fill: 'Bought in $100' },
-{ label: 'Done', fill: 'Done for the night' }
-];
 function renderQuickChips() {
 const chips = document.getElementById('quick-chips');
 if (currentMode !== 'track' || recapActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
-chips.innerHTML = chipDefs.map(c => `<button type="button" data-fill="${c.fill}" class="flex-shrink-0 bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-gray-300 text-xs font-medium px-3 py-1.5 rounded-full transition">${c.label}</button>`).join('');
+const mk = (amt) => currentUnits === 'dollars' ? '$' + amt.toFixed(2) : (currentUnits === 'bb' ? amt.toFixed(2) + 'bb' : amt + ' chips');
+const defs = [
+{ a: 'Won +' + mk(20), b: 'Won ' + mk(20) },
+{ a: 'Rebuy ' + mk(5), b: 'Bought in ' + mk(5) },
+{ a: 'Rebuy ' + mk(20), b: 'Bought in ' + mk(20) },
+{ a: 'Rebuy ' + mk(100), b: 'Bought in ' + mk(100) },
+{ a: 'Done', b: 'Done for the night' }
+];
+chips.innerHTML = defs.map(c => `<button type="button" data-fill="${c.b}" class="flex-shrink-0 bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-gray-300 text-xs font-medium px-3 py-1.5 rounded-full transition">${c.a}</button>`).join('');
 if (recapSessionId && !recapActive) {
 chips.innerHTML += `<button type="button" data-action="recap" class="flex-shrink-0 border border-emerald-600 text-emerald-400 hover:bg-emerald-600 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-full transition">Recap session</button>`;
 }
@@ -509,7 +562,7 @@ let resultHTML = '';
 if (e.result) {
 resultHTML = `<div class="flex items-center gap-2 pt-1 border-t border-neutral-800 mt-1">
 <span class="text-xs font-semibold ${isWon(e.result)? 'text-emerald-400': 'text-red-400'}">${isWon(e.result)? 'Won': 'Lost'}</span>
-${e.amount? `<span class="text-xs ${isWon(e.result)? 'text-emerald-400': 'text-red-400'}">$${e.amount.toFixed(2)}</span>`: ''}
+${e.amount? `<span class="text-xs ${isWon(e.result)? 'text-emerald-400': 'text-red-400'}">${unitAmount(e.amount)}</span>`: ''}
 </div>`;
 }
 return `<div id="hist-${e.id}" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">${top}<p class="text-sm text-gray-300">${e.reply}</p>${resultHTML}</div>`;
@@ -716,7 +769,7 @@ appendMessage(text, true); input.value = ''; input.disabled = true; sendBtn.disa
 const lb = appendMessage('...', false);
 const { data: { session } } = await sb.auth.getSession();
 const mode = recapActive ? 'recap' : currentMode;
-const body = { message: text, mode };
+const body = { message: text, mode, units: currentUnits };
 if (recapActive && recapSessionId) body.session_id = recapSessionId;
 try {
 const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] = 'Bearer ' + session.access_token;
@@ -922,7 +975,7 @@ if (h.position) left += ' / ' + h.position;
 if (h.player_action) left += ' / ' + h.player_action;
 let right = '';
 if (h.result) { const w = isWon(h.result); right += `<span class="${w ? 'text-emerald-400' : 'text-red-400'}">${w ? 'Won' : 'Lost'}</span>`; }
-if (h.amount) right += ` <span class="text-gray-400">$${h.amount.toFixed(2)}</span>`;
+if (h.amount) right += ` <span class="text-gray-400">${unitAmount(h.amount)}</span>`;
 return `<div class="flex justify-between text-xs py-1 border-b border-neutral-800 last:border-0"><span class="text-emerald-400 font-semibold">${left}</span><span>${right}</span></div>`;
 }).join('')}
 </div>`;
