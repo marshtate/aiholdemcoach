@@ -241,6 +241,7 @@ def run_pipeline(user_input, mode, user_id=None):
                                 supabase.table("sessions").update(row).eq("id", sid).execute()
                             else:
                                 discord_ping(f"close_session update: {exc}")
+                        credit_bankroll(user_id, parsed.get("profit"))
                 except Exception as exc:
                     discord_ping(f"close_session: {exc}")
             reply = format_track(parsed, session, closed)
@@ -692,6 +693,75 @@ def ensure_profile(user_id):
     except:
         pass
     return {"user_id": user_id, "username": username}
+
+def ensure_bankroll(user_id):
+    try:
+        res = supabase.table("bankrolls").select("user_id").eq("user_id", user_id).execute()
+        if not (res.data or []):
+            supabase.table("bankrolls").insert({"user_id": user_id, "amount": 0}).execute()
+    except Exception as exc:
+        discord_ping(f"ensure_bankroll: {exc}")
+
+def credit_bankroll(user_id, profit):
+    if profit is None:
+        return
+    try:
+        ensure_bankroll(user_id)
+        res = supabase.table("bankrolls").select("amount").eq("user_id", user_id).execute()
+        current = float((res.data[0] or {}).get("amount") or 0) if (res.data or []) else 0
+        supabase.table("bankrolls").update({"amount": round(current + float(profit), 2)}).eq("user_id", user_id).execute()
+    except Exception as exc:
+        discord_ping(f"credit_bankroll: {exc}")
+
+@app.get("/api/bankroll")
+async def bankroll_get(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        ensure_bankroll(uid)
+        res = supabase.table("bankrolls").select("amount, goal").eq("user_id", uid).execute()
+        row = res.data[0] if (res.data and res.data[0]) else {"amount": 0, "goal": None}
+        return {"amount": float(row.get("amount") or 0), "goal": row.get("goal")}
+    except Exception as exc:
+        discord_ping(f"bankroll get: {exc}")
+        return {"amount": 0, "goal": None}
+
+@app.post("/api/bankroll")
+async def bankroll_set(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    updates = {}
+    if "amount" in body:
+        try:
+            updates["amount"] = round(float(body["amount"]), 2)
+        except:
+            return {"error": "amount must be a number"}
+    if "goal" in body:
+        g = body["goal"]
+        if g in ("", None):
+            updates["goal"] = None
+        else:
+            try:
+                updates["goal"] = round(float(g), 2)
+            except:
+                return {"error": "goal must be a number"}
+    if not updates:
+        return {"error": "nothing to update"}
+    try:
+        ensure_bankroll(uid)
+        supabase.table("bankrolls").update(updates).eq("user_id", uid).execute()
+        res = supabase.table("bankrolls").select("amount, goal").eq("user_id", uid).execute()
+        row = res.data[0] if (res.data and res.data[0]) else {"amount": 0, "goal": None}
+        return {"ok": True, "amount": float(row.get("amount") or 0), "goal": row.get("goal")}
+    except Exception as exc:
+        discord_ping(f"bankroll set: {exc}")
+        return {"error": "Could not update bankroll."}
 
 def get_pair_rows(a, b):
     try:

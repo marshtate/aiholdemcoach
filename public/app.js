@@ -13,6 +13,8 @@ let recapActive = false;
 let recapSessionId = null;
 
 function showApp() {
+const splash = document.getElementById('splash');
+if (splash) splash.classList.add('hidden');
 document.getElementById('bottom-nav').classList.remove('hidden');
 appHeader.classList.remove('hidden');
 authScreen.classList.add('hidden');
@@ -23,6 +25,8 @@ loadHome();
 showOnboarding();
 }
 function showAuth() {
+const splash = document.getElementById('splash');
+if (splash) splash.classList.add('hidden');
 document.getElementById('bottom-nav').classList.add('hidden');
 appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
@@ -144,7 +148,8 @@ showResetPanel();
 if (event === 'SIGNED_OUT') { showAuth(); }
 });
 handleDiscordCallback();
-sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecovery()) showApp(); });
+sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecovery()) showApp(); else { const splash = document.getElementById('splash'); if (splash) splash.classList.add('hidden'); } });
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(function() {}); }
 const modeCoachBtn = document.getElementById('mode-coach-btn');
 const modeTrackBtn = document.getElementById('mode-track-btn');
 
@@ -348,6 +353,9 @@ const winRate = closed.length > 0? Math.round((wins / closed.length) * 100): nul
 
 let html = '';
 
+let bankroll = null;
+try { bankroll = await authedFetch('/api/bankroll'); } catch {}
+
 if (open) {
 const bin = open.buyins || 0;
 html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 space-y-1">
@@ -357,6 +365,24 @@ html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 
 ${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${bin.toFixed(2)} in</span>` : ''}
 </div>
 <p class="text-xs text-gray-500">Log hands. Say "done" when you're ready and confirm your buy-in and cash-out to close.</p>
+</div>`;
+}
+
+if (bankroll && typeof bankroll.amount === 'number') {
+const amt = bankroll.amount || 0;
+const goal = bankroll.goal;
+const pct = goal > 0 ? Math.min(100, Math.round((amt / goal) * 100)) : 0;
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<div class="flex items-center justify-between">
+<h3 class="text-sm font-semibold text-gray-300">Bankroll</h3>
+<button onclick="openBankroll()" class="text-xs text-gray-500 hover:text-emerald-400 transition">${bankroll.goal ? 'edit' : (amt === 0 ? 'setup' : 'set goal')}</button>
+</div>
+<div class="flex items-end justify-between">
+<p class="text-2xl font-bold ${amt >= 0 ? 'text-emerald-400' : 'text-red-400'}">$${amt.toFixed(2)}</p>
+${goal ? `<p class="text-xs text-gray-500">Goal $${goal.toFixed(2)}</p>` : ''}
+</div>
+${goal && goal > 0 ? `<div class="w-full bg-black rounded-full h-2"><div class="bar bg-emerald-500" style="width: ${pct}%"></div></div><p class="text-xs text-gray-500">${pct}% of goal</p>` : ''}
+<p class="text-[10px] text-gray-600">Auto-updates with your session profit.</p>
 </div>`;
 }
 
@@ -429,7 +455,47 @@ el.innerHTML = `<div class="text-center py-16 space-y-4">
 </div>`;
 return;
 }
-el.innerHTML = entries.map(e => {
+el.innerHTML = `<div class="space-y-3">
+<div class="flex gap-2">
+<input id="hist-search" type="text" placeholder="Search hands..." value="" oninput="applyHandFilters()" class="flex-1 bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600" />
+<select id="hist-result" onchange="applyHandFilters()" class="bg-black text-gray-300 text-xs rounded-lg px-2 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500">
+<option value="">All</option>
+<option value="won">Won</option>
+<option value="lost">Lost</option>
+</select>
+<select id="hist-tier" onchange="applyHandFilters()" class="bg-black text-gray-300 text-xs rounded-lg px-2 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500">
+<option value="">Any tier</option>
+<option value="premium">Premium</option>
+<option value="strong">Strong</option>
+<option value="playable">Playable</option>
+<option value="speculative">Speculative</option>
+<option value="trash">Trash</option>
+</select>
+</div>
+<div id="hist-list" class="space-y-3"></div>
+</div>`;
+renderHandList();
+}
+function applyHandFilters() { renderHandList(); }
+function renderHandList() {
+const listEl = document.getElementById('hist-list');
+if (!listEl) return;
+const allEntries = cachedHistory || [];
+const q = (document.getElementById('hist-search').value || '').toLowerCase().trim();
+const rf = document.getElementById('hist-result').value;
+const tf = document.getElementById('hist-tier').value;
+const entries = allEntries.filter(e => {
+if (rf && (e.result || '') !== rf) return false;
+if (tf && e.tier && e.tier.toLowerCase() !== tf) return false;
+if (tf && !e.tier) return false;
+if (q) {
+const hay = ((e.hand || '') + ' ' + (e.position || '') + ' ' + (e.player_action || '') + ' ' + (e.reply || '')).toLowerCase();
+if (!hay.includes(q)) return false;
+}
+return true;
+});
+if (entries.length === 0) { listEl.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No matching hands.</p>'; return; }
+listEl.innerHTML = entries.map(e => {
 let top = '<div class="flex items-center gap-2 flex-wrap">';
 if (e.hand) top += `<span class="text-sm font-bold text-emerald-400">${e.hand}</span>`;
 if (e.tier) top += `<span class="text-xs font-semibold px-2 py-0.5 rounded ${tierClass(e.tier)} text-white capitalize">${e.tier}</span>`;
@@ -888,6 +954,19 @@ recapSessionId = sid;
 recapActive = false;
 goToTab('chat');
 setTimeout(() => startRecap(), 150);
+}
+async function openBankroll() {
+const data = await authedFetch('/api/bankroll');
+const amtStr = prompt('Current bankroll amount ($):', data && typeof data.amount === 'number' ? String(data.amount) : '');
+if (amtStr === null) return;
+const val = parseFloat(amtStr);
+if (isNaN(val)) { alert('Enter a number for bankroll.'); return; }
+const goalStr = prompt('Goal amount ($) - leave blank for no goal:', data && data.goal ? String(data.goal) : '');
+if (goalStr === null) return;
+let goal = null;
+if (goalStr.trim() !== '') { const g = parseFloat(goalStr); if (isNaN(g)) { alert('Enter a number for the goal.'); return; } goal = g; }
+await authedFetch('/api/bankroll', { method: 'POST', body: JSON.stringify({ amount: val, goal: goal }) });
+loadHome();
 }
 async function loadLeaderboard() {
 const holder = document.getElementById('leaderboard-holder');

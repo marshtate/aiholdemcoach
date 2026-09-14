@@ -58,3 +58,11 @@ create table if not exists public.discord_links (
   linked_at timestamptz not null default now()
 );
 alter table public.discord_links enable row level security;
+
+create table if not exists public.bankrolls (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  amount numeric(12,2) not null default 0,
+  goal numeric(12,2),
+  updated_at timestamptz not null default now()
+);
+alter table public.bankrolls enable row level security;
