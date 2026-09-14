@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -307,5 +308,258 @@ async def history_endpoint(req: Request):
         user_id = resp.user.id
         result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
         return {"history": result.data}
+    except Exception as e:
+        return {"error": str(e)}
+
+def auth_user_id(req):
+    auth_header = req.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:]
+    try:
+        resp = supabase.auth.get_user(token)
+        if resp and resp.user:
+            return resp.user.id
+    except:
+        pass
+    return None
+
+def ensure_profile(user_id):
+    try:
+        res = supabase.table("profiles").select("user_id, username").eq("user_id", user_id).maybe_single().execute()
+        if res.data and res.data.get("username"):
+            return {"user_id": user_id, "username": res.data["username"]}
+    except:
+        pass
+    username = "player-" + user_id[:8]
+    try:
+        supabase.table("profiles").insert({"user_id": user_id, "username": username}).execute()
+    except:
+        pass
+    return {"user_id": user_id, "username": username}
+
+def get_pair_rows(a, b):
+    try:
+        res = supabase.table("friends").select("id, user_id, friend_id, status").or_(
+            f"(user_id.eq.{a},friend_id.eq.{b}),(user_id.eq.{b},friend_id.eq.{a})"
+        ).execute()
+        return res.data or []
+    except:
+        return []
+
+def are_friends(a, b):
+    return any(r.get("status") == "accepted" for r in get_pair_rows(a, b))
+
+def my_friend_ids(user_id):
+    try:
+        res = supabase.table("friends").select("user_id, friend_id, status").or_(
+            f"user_id.eq.{user_id},friend_id.eq.{user_id}"
+        ).execute()
+    except:
+        return []
+    ids = []
+    for r in (res.data or []):
+        other = r["friend_id"] if r["user_id"] == user_id else r["user_id"]
+        if r.get("status") == "accepted" and other != user_id and other not in ids:
+            ids.append(other)
+    return ids
+
+def usernames_for(user_ids):
+    if not user_ids:
+        return {}
+    try:
+        res = supabase.table("profiles").select("user_id, username").in_("user_id", user_ids).execute()
+        return {r["user_id"]: r.get("username") for r in (res.data or [])}
+    except:
+        return {}
+
+def session_stats(user_id):
+    try:
+        res = supabase.table("sessions").select("profit, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
+        profits = [s.get("profit") for s in (res.data or []) if s.get("profit") is not None]
+    except:
+        profits = []
+    nights = len(profits)
+    total = sum(profits)
+    wins = sum(1 for p in profits if p > 0)
+    streak = 0
+    for p in profits:
+        if p > 0:
+            streak += 1
+        else:
+            break
+    return {
+        "nights": nights,
+        "total_profit": round(total, 2),
+        "win_rate": round(wins / nights * 100) if nights else None,
+        "avg_profit": round(total / nights, 2) if nights else None,
+        "best_night": round(max(profits), 2) if nights else None,
+        "streak": streak,
+    }
+
+@app.get("/api/profile")
+async def profile_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    username = (req.query_params.get("username") or "").strip()
+    if not username:
+        return {"error": "missing username"}
+    try:
+        res = supabase.table("profiles").select("user_id, username").eq("username", username).maybe_single().execute()
+    except:
+        res = None
+    if not res or not res.data:
+        return {"error": "user not found"}
+    target = res.data["user_id"]
+    if target == user_id:
+        return {"profile": {"username": username, "stats": session_stats(target), "you": True}}
+    if not are_friends(user_id, target):
+        return {"error": "not friends"}
+    return {"profile": {"username": username, "stats": session_stats(target)}}
+
+@app.post("/api/friend-request")
+async def friend_request_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    username = (body.get("username") or "").strip()
+    if not username:
+        return {"error": "missing username"}
+    try:
+        res = supabase.table("profiles").select("user_id, username").eq("username", username).maybe_single().execute()
+    except:
+        res = None
+    if not res or not res.data:
+        return {"error": "user not found"}
+    target = res.data["user_id"]
+    if target == user_id:
+        return {"error": "can't add yourself"}
+    pair = get_pair_rows(user_id, target)
+    if pair:
+        if any(r.get("status") == "accepted" for r in pair):
+            return {"error": "already friends"}
+        return {"error": "request already exists"}
+    try:
+        supabase.table("friends").insert({"user_id": user_id, "friend_id": target, "status": "pending"}).execute()
+    except Exception as e:
+        return {"error": str(e)}
+    return {"ok": True}
+
+@app.post("/api/friend-action")
+async def friend_action_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    action = body.get("action")
+    friend_id = body.get("friend_id")
+    if action not in ("accept", "remove") or not friend_id:
+        return {"error": "bad request"}
+    pair = get_pair_rows(user_id, friend_id)
+    if not pair:
+        return {"error": "not found"}
+    if action == "accept":
+        if not any(r.get("user_id") == friend_id and r.get("status") == "pending" for r in pair):
+            if any(r.get("status") == "accepted" for r in pair):
+                return {"ok": True}
+            return {"error": "no request to accept"}
+        try:
+            for r in pair:
+                supabase.table("friends").update({"status": "accepted"}).eq("id", r["id"]).execute()
+            if not any(r.get("user_id") == user_id for r in pair):
+                supabase.table("friends").insert({"user_id": user_id, "friend_id": friend_id, "status": "accepted"}).execute()
+        except Exception as e:
+            return {"error": str(e)}
+        return {"ok": True}
+    try:
+        for r in pair:
+            supabase.table("friends").delete().eq("id", r["id"]).execute()
+    except Exception as e:
+        return {"error": str(e)}
+    return {"ok": True}
+
+@app.get("/api/friends")
+async def friends_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    me = ensure_profile(user_id)
+    try:
+        res = supabase.table("friends").select("user_id, friend_id, status").or_(
+            f"user_id.eq.{user_id},friend_id.eq.{user_id}"
+        ).execute()
+    except:
+        res = None
+    friend_ids = []
+    incoming_ids = []
+    outgoing_ids = []
+    for r in ((res.data or []) if res else []):
+        other = r["friend_id"] if r["user_id"] == user_id else r["user_id"]
+        if other == user_id:
+            continue
+        if r.get("status") == "accepted":
+            if other not in friend_ids:
+                friend_ids.append(other)
+        elif r.get("user_id") == user_id:
+            if other not in outgoing_ids:
+                outgoing_ids.append(other)
+        elif other not in incoming_ids:
+            incoming_ids.append(other)
+    names = usernames_for(friend_ids + incoming_ids + outgoing_ids)
+    friends = [{"user_id": fid, "username": names.get(fid, "?"), "stats": session_stats(fid)} for fid in friend_ids]
+    incoming = [{"user_id": uid, "username": names.get(uid, "?")} for uid in incoming_ids]
+    outgoing = [{"user_id": uid, "username": names.get(uid, "?")} for uid in outgoing_ids]
+    return {
+        "username": me["username"],
+        "stats": session_stats(user_id),
+        "friends": friends,
+        "incoming": incoming,
+        "outgoing": outgoing,
+    }
+
+@app.get("/api/leaderboard")
+async def leaderboard_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    me = ensure_profile(user_id)
+    names = usernames_for([user_id] + my_friend_ids(user_id))
+    rows = []
+    for uid in [user_id] + my_friend_ids(user_id):
+        stats = session_stats(uid)
+        if stats["nights"] == 0:
+            continue
+        rows.append({"username": names.get(uid, "?"), "you": uid == user_id, **stats})
+    rows.sort(key=lambda r: r["total_profit"], reverse=True)
+    for i, r in enumerate(rows):
+        r["rank"] = i + 1
+    return {"username": me["username"], "leaderboard": rows}
+
+@app.post("/api/username")
+async def username_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    username = (body.get("username") or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_]{3,20}", username):
+        return {"error": "usernames must be 3-20 letters, numbers, or underscores"}
+    try:
+        existing = supabase.table("profiles").select("user_id").eq("username", username).maybe_single().execute()
+        if existing.data and existing.data.get("user_id") != user_id:
+            return {"error": "username taken"}
+        supabase.table("profiles").upsert({"user_id": user_id, "username": username}).execute()
+        return {"ok": True, "username": username}
     except Exception as e:
         return {"error": str(e)}
