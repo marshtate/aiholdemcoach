@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import threading
+import urllib.request
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -25,6 +27,23 @@ try:
 except Exception as exc:
 	startup_ok = False
 	startup_error = str(exc)
+
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+
+def discord_ping(text):
+	if not DISCORD_WEBHOOK_URL:
+		return
+	def send():
+		try:
+			payload = json.dumps({"content": text}).encode()
+			req = urllib.request.Request(DISCORD_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json"})
+			urllib.request.urlopen(req, timeout=5)
+		except Exception:
+			pass
+	threading.Thread(target=send, daemon=True).start()
+
+if startup_ok is False:
+	discord_ping(f"Startup failed: {startup_error}")
 
 def evaluate_poker_hand(hero_cards, board_cards):
 	hero = [Card.new(c) for c in hero_cards]
@@ -86,8 +105,8 @@ def get_or_create_session(user_id):
 		new = supabase.table("sessions").insert({"user_id": user_id}).execute()
 		if new.data and new.data[0]:
 			return new.data[0]["id"]
-	except:
-		pass
+	except Exception as exc:
+		discord_ping(f"get_or_create_session: {exc}")
 	return None
 
 def session_buyin_total(session_id):
@@ -96,7 +115,8 @@ def session_buyin_total(session_id):
 	try:
 		res = supabase.table("buyins").select("amount").eq("session_id", session_id).execute()
 		return round(sum(r.get("amount") or 0 for r in (res.data or [])), 2)
-	except:
+	except Exception as exc:
+		discord_ping(f"session_buyin_total: {exc}")
 		return 0
 
 tools = [
@@ -194,8 +214,8 @@ def run_pipeline(user_input, mode, user_id=None):
                     sid = get_or_create_session(user_id)
                     if sid and args.get("amount") is not None:
                         supabase.table("buyins").insert({"session_id": sid, "user_id": user_id, "amount": args["amount"]}).execute()
-                except:
-                    pass
+                except Exception as exc:
+                    discord_ping(f"record_buyin insert: {exc}")
             if tc.function.name == "close_session":
                 closed = True
         if mode == "track":
@@ -214,12 +234,14 @@ def run_pipeline(user_input, mode, user_id=None):
                             row["cashout"] = cashout
                         try:
                             supabase.table("sessions").update(row).eq("id", sid).execute()
-                        except:
+                        except Exception as exc:
                             if "cashout" in row:
                                 del row["cashout"]
                                 supabase.table("sessions").update(row).eq("id", sid).execute()
-                except:
-                    pass
+                            else:
+                                discord_ping(f"close_session update: {exc}")
+                except Exception as exc:
+                    discord_ping(f"close_session: {exc}")
             reply = format_track(parsed, session, closed)
             return reply, parsed, session, tool_called, closed
     eval_data = ""
@@ -299,6 +321,7 @@ async def chat_endpoint(req: Request):
             else:
                 supabase.table("messages").insert(row).execute()
         except Exception as e:
+            discord_ping(f"chat message insert: {e}")
             reply += f" (log error: {str(e)})"
     return {"reply": reply, "parsed": parsed}
 
@@ -318,7 +341,8 @@ async def sessions_endpoint(req: Request):
     try:
         result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status").eq("user_id", user_id).order("created_at", desc=True).execute()
         sessions = result.data or []
-    except:
+    except Exception as exc:
+        discord_ping(f"get sessions: {exc}")
         sessions = []
     sid_list = [r["id"] for r in sessions]
     buyin_map = {}
