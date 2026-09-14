@@ -28,7 +28,7 @@ alter table public.sessions add column if not exists cashout numeric;
 
 create table if not exists public.buyins (
   id bigserial primary key,
-  session_id uuid not null references public.sessions(id) on delete cascade,
+  session_id bigint not null references public.sessions(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   amount numeric not null,
   created_at timestamptz not null default now()
