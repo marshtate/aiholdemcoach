@@ -326,9 +326,10 @@ def auth_user_id(req):
 
 def ensure_profile(user_id):
     try:
-        res = supabase.table("profiles").select("user_id, username").eq("user_id", user_id).maybe_single().execute()
-        if res.data and res.data.get("username"):
-            return {"user_id": user_id, "username": res.data["username"]}
+        res = supabase.table("profiles").select("user_id, username").eq("user_id", user_id).execute()
+        rows = getattr(res, "data", None) or []
+        if rows and rows[0].get("username"):
+            return {"user_id": user_id, "username": rows[0]["username"]}
     except:
         pass
     username = "player-" + user_id[:8]
@@ -406,12 +407,13 @@ async def profile_endpoint(req: Request):
     if not username:
         return {"error": "missing username"}
     try:
-        res = supabase.table("profiles").select("user_id, username").eq("username", username).maybe_single().execute()
+        res = supabase.table("profiles").select("user_id, username").eq("username", username).execute()
     except:
         res = None
-    if not res or not res.data:
+    rows = getattr(res, "data", None) or []
+    if not rows:
         return {"error": "user not found"}
-    target = res.data["user_id"]
+    target = rows[0]["user_id"]
     if target == user_id:
         return {"profile": {"username": username, "stats": session_stats(target), "you": True}}
     if not are_friends(user_id, target):
@@ -431,12 +433,13 @@ async def friend_request_endpoint(req: Request):
     if not username:
         return {"error": "missing username"}
     try:
-        res = supabase.table("profiles").select("user_id, username").eq("username", username).maybe_single().execute()
+        res = supabase.table("profiles").select("user_id, username").eq("username", username).execute()
     except:
         res = None
-    if not res or not res.data:
+    rows = getattr(res, "data", None) or []
+    if not rows:
         return {"error": "user not found"}
-    target = res.data["user_id"]
+    target = rows[0]["user_id"]
     if target == user_id:
         return {"error": "can't add yourself"}
     pair = get_pair_rows(user_id, target)
@@ -556,9 +559,13 @@ async def username_endpoint(req: Request):
     if not re.fullmatch(r"[a-z0-9_]{3,20}", username):
         return {"error": "usernames must be 3-20 letters, numbers, or underscores"}
     try:
-        existing = supabase.table("profiles").select("user_id").eq("username", username).maybe_single().execute()
-        if existing.data and existing.data.get("user_id") != user_id:
-            return {"error": "username taken"}
+        existing = supabase.table("profiles").select("user_id").eq("username", username).execute()
+    except:
+        existing = None
+    rows = getattr(existing, "data", None) or []
+    if rows and rows[0].get("user_id") != user_id:
+        return {"error": "username taken"}
+    try:
         supabase.table("profiles").upsert({"user_id": user_id, "username": username}).execute()
         return {"ok": True, "username": username}
     except Exception as e:
