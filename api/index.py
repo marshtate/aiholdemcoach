@@ -261,7 +261,7 @@ async def chat_endpoint(req: Request):
         except:
             pass
     reply, parsed, session, tool_called, closed = run_pipeline(user_input, mode, user_id)
-    if user_id and tool_called and not closed:
+    if user_id and tool_called and not closed and not parsed.get("buyin"):
         try:
             session_id = get_or_create_session(user_id) if mode == "track" else None
             row_hand = parsed.get("hand") or (session.get("hand") if session else None)
