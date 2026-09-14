@@ -3,6 +3,7 @@ import json
 import re
 import threading
 import urllib.request
+import urllib.parse
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -465,6 +466,211 @@ def auth_user_id(req):
     except:
         pass
     return None
+
+@app.post("/api/history/update")
+async def history_update(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    rid = body.get("id")
+    if not rid:
+        return {"error": "missing id"}
+    updates = {}
+    for k in ("hand", "position", "player_action", "result", "amount"):
+        if k in body:
+            v = body[k]
+            updates[k] = v if v not in ("", None) else None
+    if not updates:
+        return {"error": "nothing to update"}
+    try:
+        supabase.table("messages").update(updates).eq("id", rid).eq("user_id", uid).execute()
+        return {"ok": True}
+    except Exception as exc:
+        discord_ping(f"history update: {exc}")
+        return {"error": str(exc)}
+
+@app.post("/api/history/delete")
+async def history_delete(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    rid = body.get("id")
+    if not rid:
+        return {"error": "missing id"}
+    try:
+        supabase.table("messages").delete().eq("id", rid).eq("user_id", uid).execute()
+        return {"ok": True}
+    except Exception as exc:
+        discord_ping(f"history delete: {exc}")
+        return {"error": str(exc)}
+
+@app.get("/api/session")
+async def session_detail(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    sid = req.query_params.get("id")
+    if not sid:
+        return {"error": "missing id"}
+    try:
+        sres = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, label").eq("id", sid).eq("user_id", uid).execute()
+        sess = sres.data[0] if (sres.data and sres.data[0]) else None
+        if not sess:
+            return {"error": "not found"}
+        hands = supabase.table("messages").select("id, hand, position, player_action, result, amount, created_at").eq("session_id", sid).order("created_at", asc=True).execute()
+        buyins = supabase.table("buyins").select("amount, created_at").eq("session_id", sid).order("created_at", asc=True).execute()
+        sess["hands"] = hands.data or []
+        sess["buyin_list"] = buyins.data or []
+        sess["buyins_total"] = session_buyin_total(sid)
+        return {"session": sess}
+    except Exception as exc:
+        discord_ping(f"session detail: {exc}")
+        return {"error": str(exc)}
+
+@app.post("/api/session/delete")
+async def session_delete(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    sid = body.get("id")
+    if not sid:
+        return {"error": "missing id"}
+    try:
+        supabase.table("buyins").delete().eq("session_id", sid).eq("user_id", uid).execute()
+        supabase.table("recap_messages").delete().eq("session_id", sid).eq("user_id", uid).execute()
+        supabase.table("messages").delete().eq("session_id", sid).eq("user_id", uid).execute()
+        supabase.table("sessions").delete().eq("id", sid).eq("user_id", uid).execute()
+        return {"ok": True}
+    except Exception as exc:
+        discord_ping(f"session delete: {exc}")
+        return {"error": str(exc)}
+
+@app.post("/api/session/rename")
+async def session_rename(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    sid = body.get("id")
+    if not sid:
+        return {"error": "missing id"}
+    label = (body.get("label") or "").strip()[:40]
+    try:
+        supabase.table("sessions").update({"label": label or None}).eq("id", sid).eq("user_id", uid).execute()
+        return {"ok": True}
+    except Exception as exc:
+        discord_ping(f"session rename: {exc}")
+        return {"error": str(exc)}
+
+DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
+
+@app.get("/api/discord/config")
+async def discord_config(req: Request):
+    return {"client_id": DISCORD_CLIENT_ID, "enabled": bool(DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET)}
+
+@app.get("/api/discord/link")
+async def discord_link_status(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        res = supabase.table("discord_links").select("discord_id, discord_username").eq("user_id", uid).execute()
+        row = res.data[0] if (res.data and res.data[0]) else None
+        return {"linked": bool(row), "username": row.get("discord_username", "") if row else ""}
+    except Exception as exc:
+        discord_ping(f"discord link status: {exc}")
+        return {"linked": False, "username": ""}
+
+@app.post("/api/discord/link")
+async def discord_link(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    code = body.get("code")
+    redirect_uri = body.get("redirect_uri") or ""
+    if not code:
+        return {"error": "missing code"}
+    if not DISCORD_CLIENT_ID or not DISCORD_CLIENT_SECRET:
+        return {"error": "Discord is not configured yet."}
+    try:
+        form = urllib.parse.urlencode({
+            "client_id": DISCORD_CLIENT_ID,
+            "client_secret": DISCORD_CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+        }).encode()
+        treq = urllib.request.Request("https://discord.com/api/oauth2/token", data=form, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        tokens = json.loads(urllib.request.urlopen(treq, timeout=10).read().decode())
+        if not tokens.get("access_token"):
+            return {"error": "Could not exchange code."}
+        mreq = urllib.request.Request("https://discord.com/api/v10/users/@me", headers={"Authorization": "Bearer " + tokens["access_token"]})
+        me = json.loads(urllib.request.urlopen(mreq, timeout=10).read().decode())
+        discord_id = me.get("id")
+        if not discord_id:
+            return {"error": "Could not fetch Discord user."}
+        username = me.get("username", "DiscordUser")
+        rel = supabase.table("discord_links")
+        rel.delete().eq("user_id", uid).execute()
+        rel.insert({"user_id": uid, "discord_id": discord_id, "discord_username": username}).execute()
+        return {"ok": True, "username": username}
+    except Exception as exc:
+        discord_ping(f"discord link: {exc}")
+        return {"error": "Discord linking failed."}
+
+@app.post("/api/discord/share")
+async def discord_share(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    webhook = os.environ.get("DISCORD_SHARE_WEBHOOK_URL", "")
+    if not webhook:
+        return {"error": "Share webhook not configured."}
+    try:
+        sres = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", uid).eq("status", "closed").order("closed_at", desc=True).limit(1).execute()
+        sess = sres.data[0] if (sres.data and sres.data[0]) else None
+        if not sess:
+            return {"error": "No completed session to share."}
+        hands_res = supabase.table("messages").select("hand").eq("session_id", sess["id"]).execute()
+        hand_count = len([h for h in (hands_res.data or []) if h.get("hand")])
+        buyin_total = session_buyin_total(sess["id"])
+        p = sess.get("profit")
+        pstr = f"{'+' if p >= 0 else ''}{p:.2f}" if p is not None else "0.00"
+        c = supabase.table("profiles").select("username").eq("user_id", uid).execute()
+        username = (c.data[0] or {}).get("username", "Player") if c.data else "Player"
+        msg = f"**{username}** tonight: **${pstr}** over **{hand_count} hands**"
+        if buyin_total:
+            msg += f", **${buyin_total:.2f}** bought in"
+        msg += " · AI Holdem Coach"
+        lres = supabase.table("discord_links").select("discord_id").eq("user_id", uid).execute()
+        if lres.data and lres.data[0] and lres.data[0].get("discord_id"):
+            msg += f" <@{lres.data[0]['discord_id']}>"
+        payload = urllib.request.Request(webhook, data=json.dumps({"content": msg}).encode(), headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(payload, timeout=10)
+        return {"ok": True}
+    except Exception as exc:
+        discord_ping(f"discord share: {exc}")
+        return {"error": "Could not post to Discord."}
 
 def ensure_profile(user_id):
     try:

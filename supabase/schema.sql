@@ -37,6 +37,8 @@ create index if not exists buyins_session_idx on public.buyins (session_id);
 create index if not exists buyins_user_idx on public.buyins (user_id);
 alter table public.buyins enable row level security;
 
+alter table public.sessions add column if not exists label text;
+
 create table if not exists public.recap_messages (
   id bigserial primary key,
   session_id bigint not null references public.sessions(id) on delete cascade,
@@ -47,3 +49,12 @@ create table if not exists public.recap_messages (
 );
 create index if not exists recap_session_idx on public.recap_messages (session_id);
 alter table public.recap_messages enable row level security;
+
+create table if not exists public.discord_links (
+  id bigserial primary key,
+  user_id uuid not null unique references auth.users(id) on delete cascade,
+  discord_id text not null,
+  discord_username text not null,
+  linked_at timestamptz not null default now()
+);
+alter table public.discord_links enable row level security;

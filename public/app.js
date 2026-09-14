@@ -143,6 +143,7 @@ showResetPanel();
 }
 if (event === 'SIGNED_OUT') { showAuth(); }
 });
+handleDiscordCallback();
 sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecovery()) showApp(); });
 const modeCoachBtn = document.getElementById('mode-coach-btn');
 const modeTrackBtn = document.getElementById('mode-track-btn');
@@ -402,10 +403,11 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
 ${recent.map(s => {
 const d = new Date(s.closed_at || s.created_at).toLocaleDateString();
 const p = s.profit || 0;
-return `<div class="flex justify-between items-center text-xs">
-<span class="text-gray-400">${d}</span>
+const label = s.label ? s.label + ' · ' : '';
+return `<button onclick="openSession(${s.id}, 'home-view')" class="w-full flex justify-between items-center text-xs text-left hover:bg-black/40 rounded-lg px-2 py-1 -mx-2 transition">
+<span class="text-gray-400">${label}${d}</span>
 <span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span>
-</div>`;
+</button>`;
 }).join('')}
 </div>`;
 }
@@ -433,7 +435,9 @@ if (e.hand) top += `<span class="text-sm font-bold text-emerald-400">${e.hand}</
 if (e.tier) top += `<span class="text-xs font-semibold px-2 py-0.5 rounded ${tierClass(e.tier)} text-white capitalize">${e.tier}</span>`;
 if (e.position) top += `<span class="text-xs text-gray-500">${e.position}</span>`;
 if (e.player_action) top += `<span class="text-xs font-semibold text-gray-300">${e.player_action}</span>`;
-top += `<span class="text-xs text-gray-600 ml-auto">${new Date(e.created_at).toLocaleDateString()}</span></div>`;
+top += `<span class="text-xs text-gray-600 ml-auto">${new Date(e.created_at).toLocaleDateString()}</span>`;
+top += `<button onclick="beginEdit('${e.id}')" class="text-[10px] text-gray-600 hover:text-emerald-400 ml-1 transition">edit</button>`;
+top += '</div>';
 let resultHTML = '';
 if (e.result) {
 resultHTML = `<div class="flex items-center gap-2 pt-1 border-t border-neutral-800 mt-1">
@@ -441,8 +445,46 @@ resultHTML = `<div class="flex items-center gap-2 pt-1 border-t border-neutral-8
 ${e.amount? `<span class="text-xs ${e.result === 'won'? 'text-emerald-400': 'text-red-400'}">$${e.amount.toFixed(2)}</span>`: ''}
 </div>`;
 }
-return `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">${top}<p class="text-sm text-gray-300">${e.reply}</p>${resultHTML}</div>`;
+return `<div id="hist-${e.id}" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">${top}<p class="text-sm text-gray-300">${e.reply}</p>${resultHTML}</div>`;
 }).join('');
+}
+function beginEdit(id) {
+const e = (cachedHistory || []).find(h => h.id == id);
+if (!e) return;
+const card = document.getElementById('hist-' + id);
+card.innerHTML = `<div class="space-y-2">
+<div class="flex gap-2">
+<input id="eh-${id}" value="${e.hand || ''}" placeholder="Hand" class="flex-1 bg-black text-emerald-400 text-sm font-bold rounded px-2 py-1.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" />
+<input id="ep-${id}" value="${e.position || ''}" placeholder="Position" class="w-20 bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" />
+</div>
+<div class="flex gap-2">
+<input id="ea-${id}" value="${e.player_action || ''}" placeholder="Action" class="flex-1 bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" />
+<select id="er-${id}" class="bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none"><option value="">—</option><option value="won" ${e.result === 'won' ? 'selected' : ''}>Won</option><option value="lost" ${e.result === 'lost' ? 'selected' : ''}>Lost</option></select>
+<input id="eamt-${id}" type="number" value="${e.amount || ''}" placeholder="$" class="w-16 bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" />
+</div>
+<div class="flex items-center gap-2 pt-1">
+<button onclick="saveEdit('${id}')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold px-3 py-1 rounded transition">Save</button>
+<button onclick="cancelEdit()" class="text-gray-500 hover:text-gray-300 text-[11px] px-2 py-1 transition">Cancel</button>
+<button onclick="deleteHand('${id}')" class="text-red-500 hover:text-red-400 text-[11px] ml-auto">Delete</button>
+</div></div>`;
+}
+async function saveEdit(id) {
+const hand = document.getElementById('eh-' + id).value.trim();
+const position = document.getElementById('ep-' + id).value.trim();
+const action = document.getElementById('ea-' + id).value.trim();
+const result = document.getElementById('er-' + id).value || null;
+const amtVal = document.getElementById('eamt-' + id).value;
+const amount = amtVal ? parseFloat(amtVal) : null;
+await authedFetch('/api/history/update', { method: 'POST', body: JSON.stringify({ id, hand, position, player_action: action, result, amount }) });
+cachedHistory = null;
+loadHistory();
+}
+function cancelEdit() { cachedHistory = null; loadHistory(); }
+async function deleteHand(id) {
+if (!confirm('Delete this hand entry?')) return;
+await authedFetch('/api/history/delete', { method: 'POST', body: JSON.stringify({ id }) });
+cachedHistory = null;
+loadHistory();
 }
 
 async function loadStats() {
@@ -525,12 +567,32 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
 ${recent.map(s => {
 const d = new Date(s.closed_at || s.created_at).toLocaleDateString();
 const p = s.profit || 0;
+const label = s.label ? s.label + ' · ' : '';
 const nit = s.buyins ? `<span class="text-gray-500">$${(s.buyins)} in</span> ` : '';
-return `<div class="flex justify-between items-center text-xs"><span class="text-gray-400">${d}</span><div class="flex items-center gap-2"><span class="text-gray-600">${nit}</span><span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span></div></div>`;
+return `<button onclick="openSession(${s.id}, 'stats-view')" class="w-full flex justify-between items-center text-xs text-left hover:bg-black/40 rounded-lg px-2 py-1 -mx-2 transition">
+<span class="text-gray-400">${label}${d}</span>
+<div class="flex items-center gap-2">${nit}<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span></div>
+</button>`;
 }).join('')}
+</div>`;
+if (closed.length >= 2) {
+const chartSessions = closed.slice(-10);
+const maxAbs = Math.max(1, ...chartSessions.map(s => Math.abs(s.profit || 0)));
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
+<h3 class="text-sm font-semibold text-gray-300">Profit trend</h3>
+<div class="flex items-end gap-1 h-20">
+${chartSessions.map(s => {
+const p = s.profit || 0;
+const pct = Math.max(4, Math.round((Math.abs(p) / maxAbs) * 100));
+const color = p >= 0 ? 'bg-emerald-500' : 'bg-red-500';
+const d = new Date(s.closed_at || s.created_at).toLocaleDateString([], {month:'short', day:'numeric'});
+return `<div class="flex-1 flex flex-col items-center gap-0.5 h-full justify-end" title="${d}: ${p >= 0 ? '+' : ''}$${p.toFixed(2)}"><div class="w-full ${color} rounded-sm" style="height:${pct}%"></div></div>`;
+}).join('')}
+</div>
 </div>`;
 } else {
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4"><p class="text-sm text-gray-500 text-center">Track a session and close it to see your nights.</p></div>`;
+}
 }
 
 const topHands = Object.entries(hands).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -699,8 +761,133 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <p class="text-xs text-gray-500">Ranks you and your friends by total profit. Sessions only - no hand data is shared.</p>
 <div id="leaderboard-holder"></div>
 </div>`;
+html += `<div id="discord-card" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<h3 class="text-sm font-semibold text-gray-300">Discord</h3>
+<p class="text-xs text-gray-500">Post your nights to the community server and tag yourself.</p>
+<div id="discord-status" class="text-xs text-gray-400">Loading...</div>
+</div>`;
 el.innerHTML = html;
 loadLeaderboard();
+loadDiscordStatus();
+}
+async function loadDiscordStatus() {
+const statusEl = document.getElementById('discord-status');
+if (!statusEl) return;
+const config = await authedFetch('/api/discord/config');
+const link = await authedFetch('/api/discord/link');
+if (!config || !config.enabled) { statusEl.innerHTML = '<p class="text-gray-500">Discord sharing isn\'t configured by the owner yet.</p>'; return; }
+if (!link || !link.linked) {
+statusEl.innerHTML = `<button onclick="startDiscordLink()" class="bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Connect Discord</button>`;
+} else {
+statusEl.innerHTML = `<p class="text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>
+<button onclick="shareTonight()" class="bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition mt-2">Share my latest night</button>`;
+}
+}
+async function startDiscordLink() {
+const config = await authedFetch('/api/discord/config');
+if (!config || !config.client_id) { alert('Discord sharing isn\'t configured yet.'); return; }
+const state = Math.random().toString(36).slice(2);
+localStorage.setItem('discord_state', state);
+const redirect = encodeURIComponent(window.location.origin + '/');
+window.location.href = 'https://discord.com/api/oauth2/authorize?client_id=' + config.client_id + '&response_type=code&redirect_uri=' + redirect + '&scope=identify&state=' + state;
+}
+async function shareTonight() {
+const data = await authedFetch('/api/discord/share', { method: 'POST', body: '{}' });
+if (data && data.error) { alert(data.error); return; }
+const s = document.getElementById('discord-status');
+if (s) s.innerHTML = '<p class="text-emerald-400">Posted! Check your Discord channel.</p>';
+setTimeout(() => loadDiscordStatus(), 3000);
+}
+async function handleDiscordCallback() {
+const params = new URLSearchParams(window.location.search);
+const code = params.get('code');
+const state = params.get('state');
+if (!code || !state) return false;
+if (state !== localStorage.getItem('discord_state')) { history.replaceState(null, '', window.location.pathname); return false; }
+localStorage.removeItem('discord_state');
+const { data: { session } } = await sb.auth.getSession();
+if (!session) { history.replaceState(null, '', window.location.pathname); alert('Sign in first, then connect Discord.'); return true; }
+const data = await authedFetch('/api/discord/link', { method: 'POST', body: JSON.stringify({ code, redirect_uri: window.location.origin + '/' }) });
+history.replaceState(null, '', window.location.pathname);
+if (data && data.ok) alert('Connected to Discord as @' + data.username);
+else alert((data && data.error) || 'Could not connect Discord.');
+return true;
+}
+async function openSession(sid, targetId) {
+const el = document.getElementById(targetId);
+el.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Loading...</p>';
+const data = await authedFetch('/api/session?id=' + sid);
+if (!data || data.error) { el.innerHTML = '<p class="text-sm text-red-400 text-center py-8">' + ((data && data.error) || 'Not found.') + '</p>'; return; }
+const s = data.session;
+const d = new Date(s.closed_at || s.created_at);
+const dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+const p = s.profit || 0;
+const pStr = p >= 0 ? '+$' + p.toFixed(2) : '-$' + Math.abs(p).toFixed(2);
+let html = `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<button onclick="relaunchTab('${targetId}')" class="text-xs text-gray-400 hover:text-emerald-400">&larr; Back</button>
+<div class="flex items-center justify-between pt-1">
+<h2 class="text-base font-bold text-gray-200">${s.label || 'Session'}</h2>
+<span class="text-xs text-gray-500">${dateStr}</span>
+</div>
+<div class="grid grid-cols-3 gap-2 mt-2">
+<div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${pStr}</p><p class="text-[10px] text-gray-500">Profit</p></div>
+<div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold text-gray-300">$${(s.buyins_total || 0).toFixed(2)}</p><p class="text-[10px] text-gray-500">Buy-ins</p></div>
+<div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold text-gray-300">${s.hands.length}</p><p class="text-[10px] text-gray-500">Hands</p></div>
+</div>
+<div class="flex gap-3 pt-1">
+<button onclick="renameSession(${s.id})" class="text-xs text-gray-500 hover:text-emerald-400 transition">Rename</button>
+<button onclick="deleteSession(${s.id})" class="text-xs text-gray-500 hover:text-red-400 transition">Delete</button>
+<button onclick="recapSession(${s.id})" class="text-xs text-emerald-400 hover:text-emerald-300 ml-auto transition">Recap with coach</button>
+</div>
+</div>`;
+if (s.buyin_list && s.buyin_list.length > 0) {
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<h3 class="text-sm font-semibold text-gray-300">Buy-ins</h3>
+${s.buyin_list.map(b => `<div class="flex justify-between text-xs"><span class="text-gray-400">${new Date(b.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span><span class="text-gray-300">$${b.amount.toFixed(2)}</span></div>`).join('')}
+</div>`;
+}
+if (s.hands.length > 0) {
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<h3 class="text-sm font-semibold text-gray-300">Hands</h3>
+${s.hands.map(h => {
+let left = h.hand || '?';
+if (h.position) left += ' / ' + h.position;
+if (h.player_action) left += ' / ' + h.player_action;
+let right = '';
+if (h.result) { const w = h.result === 'won'; right += `<span class="${w ? 'text-emerald-400' : 'text-red-400'}">${w ? 'Won' : 'Lost'}</span>`; }
+if (h.amount) right += ` <span class="text-gray-400">$${h.amount.toFixed(2)}</span>`;
+return `<div class="flex justify-between text-xs py-1 border-b border-neutral-800 last:border-0"><span class="text-emerald-400 font-semibold">${left}</span><span>${right}</span></div>`;
+}).join('')}
+</div>`;
+}
+el.innerHTML = html;
+}
+function relaunchTab(targetId) {
+if (targetId === 'home-view') goToTab('home');
+else goToTab('stats');
+}
+function renameSession(sid) {
+const name = prompt('Session name (e.g. "Tuesday night game"):', '');
+if (name === null) return;
+authedFetch('/api/session/rename', { method: 'POST', body: JSON.stringify({ id: sid, label: name.trim() }) }).then(() => {
+cachedHistory = null;
+openSession(sid, document.querySelector('#home-view:not(.hidden), #stats-view:not(.hidden)') ? document.querySelector('#home-view:not(.hidden), #stats-view:not(.hidden)').id : 'stats-view');
+});
+}
+function deleteSession(sid) {
+if (!confirm('Delete this session and all its hands? This cannot be undone.')) return;
+authedFetch('/api/session/delete', { method: 'POST', body: JSON.stringify({ id: sid }) }).then(() => {
+cachedHistory = null;
+const active = document.querySelector('#home-view:not(.hidden), #stats-view:not(.hidden)');
+if (active && active.id === 'home-view') goToTab('home');
+else goToTab('stats');
+});
+}
+function recapSession(sid) {
+recapSessionId = sid;
+recapActive = false;
+goToTab('chat');
+setTimeout(() => startRecap(), 150);
 }
 async function loadLeaderboard() {
 const holder = document.getElementById('leaderboard-holder');
