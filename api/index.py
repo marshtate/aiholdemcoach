@@ -342,11 +342,12 @@ def ensure_profile(user_id):
 def get_pair_rows(a, b):
     try:
         res = supabase.table("friends").select("id, user_id, friend_id, status").or_(
-            f"(user_id.eq.{a},friend_id.eq.{b}),(user_id.eq.{b},friend_id.eq.{a})"
+            f"user_id.eq.{a},friend_id.eq.{a}"
         ).execute()
-        return res.data or []
     except:
         return []
+    return [r for r in (res.data or [])
+            if (r["user_id"] == a and r["friend_id"] == b) or (r["user_id"] == b and r["friend_id"] == a)]
 
 def are_friends(a, b):
     return any(r.get("status") == "accepted" for r in get_pair_rows(a, b))
@@ -570,3 +571,30 @@ async def username_endpoint(req: Request):
         return {"ok": True, "username": username}
     except Exception as e:
         return {"error": str(e)}
+
+@app.post("/api/resolve-login")
+async def resolve_login_endpoint(req: Request):
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    identifier = (body.get("identifier") or "").strip().lower()
+    if not identifier:
+        return {"error": "missing identifier"}
+    if "@" in identifier:
+        return {"email": identifier}
+    try:
+        res = supabase.table("profiles").select("user_id").eq("username", identifier).execute()
+    except:
+        return {"error": "user not found"}
+    rows = getattr(res, "data", None) or []
+    if not rows:
+        return {"error": "user not found"}
+    try:
+        user = supabase.auth.admin.get_user_by_id(rows[0]["user_id"])
+        email = getattr(user, "user", None).email if user else None
+    except:
+        email = None
+    if not email:
+        return {"error": "user not found"}
+    return {"email": email}

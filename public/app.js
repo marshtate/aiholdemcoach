@@ -56,9 +56,18 @@ if (data.session) showApp(); else showError('Account created. Check email to con
 });
 document.getElementById('auth-form').addEventListener('submit', async (ev) => {
 ev.preventDefault();
-const email = document.getElementById('email').value, password = document.getElementById('password').value;
-if (!email ||!password) { showError('Enter email and password.'); return; }
-const { data, error } = await sb.auth.signInWithPassword({ email, password });
+const raw = document.getElementById('email').value, password = document.getElementById('password').value;
+if (!raw ||!password) { showError('Enter email and password.'); return; }
+let identifier = raw.trim();
+if (!identifier.includes('@')) {
+    const username = identifier.toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) { showError('That does not look like an email or username.'); return; }
+    const r = await fetch('/api/resolve-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier: username }) });
+    const d = await r.json();
+    if (d.error) { showError(d.error); return; }
+    identifier = d.email;
+}
+const { data, error } = await sb.auth.signInWithPassword({ email: identifier, password });
 if (error) { showError(error.message); return; }
 showApp();
 });
