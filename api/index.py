@@ -138,7 +138,7 @@ def format_track(parsed, session=None, closed=False):
 	parts = [hand]
 	if parsed.get("position"): parts.append(parsed["position"])
 	if parsed.get("action"): parts.append(parsed["action"])
-	if parsed.get("result"): parts.append("won" if parsed["result"].lower() == "won" else "lost")
+	if parsed.get("result"): parts.append("won" if parsed["result"].lower() in ("won", "win", "w") else "lost")
 	if parsed.get("amount"): parts.append(f"${parsed['amount']}")
 	return "Logged - " + ", ".join(parts) + "."
 def run_pipeline(user_input, mode, user_id=None):
