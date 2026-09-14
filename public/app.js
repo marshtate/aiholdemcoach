@@ -5,12 +5,14 @@ const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
 const logoutBtn = document.getElementById('logout-btn');
 const sessionDot = document.getElementById('session-dot');
+const appHeader = document.getElementById('app-header');
 const modeToggle = document.getElementById('mode-toggle-header');
 let currentMode = 'coach';
 let cachedHistory = null;
 
 function showApp() {
 document.getElementById('bottom-nav').classList.remove('hidden');
+appHeader.classList.remove('hidden');
 authScreen.classList.add('hidden');
 appScreen.classList.remove('hidden');
 logoutBtn.classList.remove('hidden');
@@ -19,6 +21,7 @@ loadHome();
 }
 function showAuth() {
 document.getElementById('bottom-nav').classList.add('hidden');
+appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
 appScreen.classList.add('hidden');
 logoutBtn.classList.add('hidden');
