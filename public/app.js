@@ -18,6 +18,7 @@ appScreen.classList.remove('hidden');
 logoutBtn.classList.remove('hidden');
 checkSession();
 loadHome();
+showOnboarding();
 }
 function showAuth() {
 document.getElementById('bottom-nav').classList.add('hidden');
@@ -33,6 +34,12 @@ const e = document.getElementById('auth-error');
 e.textContent = m;
 e.classList.remove('hidden');
 setTimeout(() => e.classList.add('hidden'), 4000);
+}
+function showNotice(m) {
+const e = document.getElementById('auth-notice');
+e.textContent = m;
+e.classList.remove('hidden');
+setTimeout(() => e.classList.add('hidden'), 6000);
 }
 
 async function checkSession() {
@@ -71,8 +78,70 @@ const { data, error } = await sb.auth.signInWithPassword({ email: identifier, pa
 if (error) { showError(error.message); return; }
 showApp();
 });
+document.getElementById('forgot-btn').addEventListener('click', () => {
+document.getElementById('auth-form').classList.add('hidden');
+document.getElementById('forgot-form').classList.remove('hidden');
+});
+document.getElementById('forgot-back').addEventListener('click', () => {
+document.getElementById('auth-form').classList.remove('hidden');
+document.getElementById('forgot-form').classList.add('hidden');
+});
+document.getElementById('send-reset-btn').addEventListener('click', async () => {
+const email = document.getElementById('forgot-email').value.trim();
+if (!email || !email.includes('@')) { showError('Enter your email.'); return; }
+const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+if (error) { showError(error.message); return; }
+document.getElementById('forgot-form').classList.add('hidden');
+document.getElementById('auth-form').classList.remove('hidden');
+showNotice('Reset link sent. Check your email.');
+});
+function showResetPanel() {
+document.getElementById('bottom-nav').classList.add('hidden');
+appHeader.classList.add('hidden');
+authScreen.classList.remove('hidden');
+appScreen.classList.add('hidden');
+logoutBtn.classList.add('hidden');
+modeToggle.classList.add('hidden');
+modeToggle.classList.remove('flex');
+document.getElementById('auth-form').classList.add('hidden');
+document.getElementById('auth-error').classList.add('hidden');
+document.getElementById('reset-panel').classList.remove('hidden');
+}
+document.getElementById('reset-submit-btn').addEventListener('click', async () => {
+const p1 = document.getElementById('new-password').value;
+const p2 = document.getElementById('new-password-2').value;
+if (p1.length < 6) { showError('Password must be at least 6 characters.'); return; }
+if (p1 !== p2) { showError('Passwords don\'t match.'); return; }
+const { error } = await sb.auth.updateUser({ password: p1 });
+if (error) { showError(error.message); return; }
+history.replaceState(null, '', window.location.pathname + window.location.search);
+document.getElementById('reset-panel').classList.add('hidden');
+document.getElementById('auth-form').classList.remove('hidden');
+showNotice('Password updated. Sign in with your new password.');
+});
 logoutBtn.addEventListener('click', async () => { await sb.auth.signOut(); showAuth(); });
-sb.auth.getSession().then(({ data: { session } }) => { if (session) showApp(); });
+function onbLoaded() { return localStorage.getItem('onboarded'); }
+function showOnboarding() {
+if (onbLoaded()) return;
+document.getElementById('onboarding').classList.remove('hidden');
+document.getElementById('onboarding').classList.add('flex');
+}
+function hideOnboarding() {
+localStorage.setItem('onboarded', '1');
+const o = document.getElementById('onboarding');
+o.classList.add('hidden');
+o.classList.remove('flex');
+}
+document.getElementById('onb-done-btn').addEventListener('click', hideOnboarding);
+function isRecovery() { return (window.location.hash || '').includes('type=recovery'); }
+sb.auth.onAuthStateChange((event, session) => {
+if (event === 'PASSWORD_RECOVERY') {
+window.history.replaceState(null, '', window.location.pathname);
+showResetPanel();
+}
+if (event === 'SIGNED_OUT') { showAuth(); }
+});
+sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecovery()) showApp(); });
 const modeCoachBtn = document.getElementById('mode-coach-btn');
 const modeTrackBtn = document.getElementById('mode-track-btn');
 
@@ -91,9 +160,49 @@ resetChat();
 
 function resetChat() {
 const chatbox = document.getElementById('chatbox');
-const intro = currentMode === 'coach'? 'Send me any hand - your cards, the board, your position - and I\'ll give you a real read.': 'Log a hand - what you played, where, what happened. When you\'re done for the night, tell me how you did - up $40, down $12 - and I\'ll close it out.';
+const intro = currentMode === 'coach'? 'Send me any hand - your cards, the board, your position - and I\'ll give you a real read.': 'Track mode. Log hands as you play. When you call it a night, say "done" and I\'ll confirm your buy-in and cash-out before closing.';
 chatbox.innerHTML = `<div class="flex items-start"><div class="bg-[#1a1a1a] text-gray-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">${intro}</div></div>`;
 document.getElementById('user-input').placeholder = currentMode === 'coach'? 'Type your hand...': 'Log your hand...';
+renderQuickChips();
+refreshSessionBanner();
+}
+const chipDefs = [
+{ label: 'Won +$20', fill: 'Won $20' },
+{ label: 'Lost $20', fill: 'Lost $20' },
+{ label: 'Rebuy $20', fill: 'Bought in $20' },
+{ label: 'Rebuy $100', fill: 'Bought in $100' },
+{ label: 'Done', fill: 'Done for the night' }
+];
+function renderQuickChips() {
+const chips = document.getElementById('quick-chips');
+if (currentMode !== 'track') { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
+chips.innerHTML = chipDefs.map(c => `<button type="button" data-fill="${c.fill}" class="flex-shrink-0 bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-gray-300 text-xs font-medium px-3 py-1.5 rounded-full transition">${c.label}</button>`).join('');
+chips.classList.remove('hidden');
+}
+document.getElementById('quick-chips').addEventListener('click', (e) => {
+const btn = e.target.closest('button[data-fill]');
+if (!btn) return;
+const inp = document.getElementById('user-input');
+inp.value = btn.dataset.fill;
+inp.focus();
+chatbox.scrollTop = chatbox.scrollHeight;
+});
+async function refreshSessionBanner() {
+const banner = document.getElementById('session-banner');
+if (!banner || currentMode !== 'track') { if (banner) banner.classList.add('hidden'); return; }
+const sessions = await fetchSessions();
+const open = sessions.find(s => s.status === 'open');
+if (open) {
+const bin = open.buyins || 0;
+banner.innerHTML = `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl px-3 py-2 flex items-center gap-2">
+<div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div>
+<span class="text-xs font-semibold text-emerald-400">Session open</span>
+<span class="ml-auto text-xs text-emerald-400">${bin > 0 ? '$' + bin.toFixed(2) + ' in' : 'no buy-ins yet'}</span>
+</div>`;
+} else {
+banner.innerHTML = `<div class="bg-neutral-900/60 border border-neutral-800 rounded-xl px-3 py-2 text-center text-xs text-gray-500">No open session. Log a hand to start one.</div>`;
+}
+banner.classList.remove('hidden');
 }
 
 const tabHome = document.getElementById('tab-home');
@@ -131,10 +240,16 @@ if (active === tabChat) { toggle.classList.remove('hidden'); toggle.classList.ad
 else { toggle.classList.add('hidden'); toggle.classList.remove('flex'); }
 }
 tabHome.addEventListener('click', () => { setActiveTab(tabHome); homeView.classList.remove('hidden'); loadHome(); });
-tabChat.addEventListener('click', () => { setActiveTab(tabChat); chatView.classList.remove('hidden'); });
+tabChat.addEventListener('click', () => { setActiveTab(tabChat); chatView.classList.remove('hidden'); renderQuickChips(); refreshSessionBanner(); });
 tabHistory.addEventListener('click', () => { setActiveTab(tabHistory); historyView.classList.remove('hidden'); loadHistory(); });
 tabStats.addEventListener('click', () => { setActiveTab(tabStats); statsView.classList.remove('hidden'); loadStats(); });
 tabSocial.addEventListener('click', () => { setActiveTab(tabSocial); socialView.classList.remove('hidden'); loadSocial(); });
+function goToTab(which) {
+if (which === 'chat' && currentMode !== 'track') modeTrackBtn.click();
+const map = { home: tabHome, chat: tabChat, history: tabHistory, stats: tabStats, social: tabSocial };
+const btn = map[which];
+if (btn) btn.click();
+}
 function tierClass(t) {
 if (!t) return 'tier-speculative';
 const l = t.toLowerCase();
@@ -173,7 +288,16 @@ const entries = await fetchHistory();
 const sessions = await fetchSessions();
 const el = document.getElementById('home-view');
 if (entries.length === 0 && sessions.length === 0) {
-el.innerHTML = '<div class="text-center py-12 space-y-2"><p class="text-lg font-semibold">No data yet.</p><p class="text-sm text-gray-500">Switch to Track and log a hand to get started.</p></div>';
+el.innerHTML = `<div class="text-center py-12 space-y-4">
+<div class="mx-auto w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 text-emerald-500"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.25 10.5a.75.75 0 00-.75.75v2.25a.75.75 0 001.5 0v-2.25a.75.75 0 00-.75-.75zm3.75 0a.75.75 0 00-.75.75v3.75a.75.75 0 001.5 0V11.25a.75.75 0 00-.75-.75zm3.75 0a.75.75 0 00-.75.75v1.5a.75.75 0 001.5 0v-1.5a.75.75 0 00-.75-.75z" clip-rule="evenodd"/></svg>
+</div>
+<p class="text-lg font-semibold">No data yet.</p>
+<p class="text-sm text-gray-500">Log your first hand in Track mode to start building stats, buy-in history, and profit trends.</p>
+<div class="flex justify-center">
+<button onclick="goToTab('chat')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition shadow-md shadow-emerald-900/40">Start tracking</button>
+</div>
+</div>`;
 return;
 }
 
@@ -190,9 +314,14 @@ const winRate = closed.length > 0? Math.round((wins / closed.length) * 100): nul
 let html = '';
 
 if (open) {
+const bin = open.buyins || 0;
 html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 space-y-1">
-<div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div><span class="text-xs font-semibold text-emerald-400">Session open</span></div>
-<p class="text-xs text-gray-500">Log hands. When you're done, tell me your profit or loss.</p>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div>
+<span class="text-xs font-semibold text-emerald-400">Session open</span>
+${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${bin.toFixed(2)} in</span>` : ''}
+</div>
+<p class="text-xs text-gray-500">Log hands. Say "done" when you're ready and confirm your buy-in and cash-out to close.</p>
 </div>`;
 }
 
@@ -252,7 +381,18 @@ el.innerHTML = html;
 async function loadHistory() {
 const entries = await fetchHistory();
 const el = document.getElementById('history-view');
-if (entries.length === 0) { el.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No hands yet.</p>'; return; }
+if (entries.length === 0) {
+el.innerHTML = `<div class="text-center py-16 space-y-4">
+<div class="mx-auto w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 text-gray-500"><path d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.678 3.348-3.97z"/></svg>
+</div>
+<p class="text-sm text-gray-400">No hands yet.</p>
+<div class="flex justify-center">
+<button onclick="goToTab('chat')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition shadow-md shadow-emerald-900/40">Log a hand</button>
+</div>
+</div>`;
+return;
+}
 el.innerHTML = entries.map(e => {
 let top = '<div class="flex items-center gap-2 flex-wrap">';
 if (e.hand) top += `<span class="text-sm font-bold text-emerald-400">${e.hand}</span>`;
@@ -275,7 +415,18 @@ async function loadStats() {
 const entries = await fetchHistory();
 const sessions = await fetchSessions();
 const el = document.getElementById('stats-view');
-if (entries.length === 0 && sessions.length === 0) { el.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">No data yet.</p>'; return; }
+if (entries.length === 0 && sessions.length === 0) {
+el.innerHTML = `<div class="text-center py-16 space-y-4">
+<div class="mx-auto w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 text-gray-500"><path d="M18.375 2.25c-1.035 0-1.875.84-1.875 1.875v15.75c0 1.035.84 1.875 1.875 1.875h.75c1.035 0 1.875-.84 1.875-1.875V4.125c0-1.036-.84-1.875-1.875-1.875h-.75zM9.75 8.625c0-1.036.84-1.875 1.875-1.875h.75c1.036 0 1.875.84 1.875 1.875v11.25c0 1.035-.84 1.875-1.875 1.875h-.75a1.875 1.875 0 01-1.875-1.875V8.625zM3 13.125c0-1.036.84-1.875 1.875-1.875h.75c1.036 0 1.875.84 1.875 1.875v6.75c0 1.035-.84 1.875-1.875 1.875h-.75A1.875 1.875 0 013 19.875v-6.75z"/></svg>
+</div>
+<p class="text-sm text-gray-400">No stats yet.</p>
+<div class="flex justify-center">
+<button onclick="goToTab('chat')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition shadow-md shadow-emerald-900/40">Start tracking</button>
+</div>
+</div>`;
+return;
+}
 
 const tiers = {}, hands = {}, actions = {};
 let folds = 0;
@@ -301,9 +452,14 @@ const roiStr = roi === null ? '-' : (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%'
 
 let html = '';
 if (open) {
+const bin = open.buyins || 0;
 html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 space-y-1">
-<div class="flex items-center gap-2"><div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div><span class="text-xs font-semibold text-emerald-400">Session open</span></div>
-<p class="text-xs text-gray-500">Log hands. When you're done, tell me your profit or loss.</p>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div>
+<span class="text-xs font-semibold text-emerald-400">Session open</span>
+${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${bin.toFixed(2)} in</span>` : ''}
+</div>
+<p class="text-xs text-gray-500">Log hands. Say "done" when you're ready and confirm your buy-in and cash-out to close.</p>
 </div>`;
 }
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
@@ -401,12 +557,11 @@ const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] 
 const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify({ message: text, mode: currentMode }) });
 const data = await res.json();
 lb.textContent = data.reply || data.error || 'No response.';
+cachedHistory = null;
 if (data.reply && data.reply.includes('Session closed')) {
 checkSession();
-cachedHistory = null;
-} else {
-cachedHistory = null;
 }
+refreshSessionBanner();
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
 finally { input.disabled = false; sendBtn.disabled = false; input.blur(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
 }

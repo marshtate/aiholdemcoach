@@ -12,6 +12,8 @@
 <style>.tab-active { color: #34d399; border-bottom: 2px solid #34d399; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #d4a017; }.tier-strong { background: #b8860b; }.tier-playable { background: #059669; }.tier-speculative { background: #047857; }.tier-trash { background: #404040; }.mode-active { background: #059669; color: white; }.mode-inactive { background: #1a1a1a; color: #94a3b8; }.bar { height: 6px; border-radius: 3px; transition: width 0.4s ease; }.pulse-green { animation: pgreen 2s infinite; }
 @keyframes pgreen { 0%,100%{opacity:1} 50%{opacity:0.5} }
 #chatbox { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 #chat-footer.kb-open { padding-bottom: calc(env(safe-area-inset-bottom) + 12px) !important; }
 input, textarea, select { font-size: 16px; }
 </style>
@@ -64,14 +66,38 @@ input, textarea, select { font-size: 16px; }
 <div class="space-y-1.5">
 <label for="password" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Password</label>
 <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" class="w-full bg-[#1a1a1a] text-gray-100 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800" />
+<button type="button" id="forgot-btn" class="text-xs text-gray-500 hover:text-emerald-400 transition">Forgot password?</button>
 </div>
 <div class="space-y-2">
 <button id="signin-btn" type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-3 rounded-lg transition shadow-md shadow-emerald-900/40">Sign In</button>
 <button id="signup-btn" type="button" class="w-full bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-white text-sm font-semibold py-3 rounded-lg transition">Create Account</button>
 </div>
 </form>
+<div id="forgot-form" class="hidden space-y-3">
+<p class="text-sm text-gray-400">Enter the email you signed up with and we'll send you a link to reset your password.</p>
+<div class="space-y-1.5">
+<label for="forgot-email" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Email</label>
+<input id="forgot-email" type="email" placeholder="you@example.com" inputmode="email" class="w-full bg-[#1a1a1a] text-gray-100 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800" />
+</div>
+<button id="send-reset-btn" type="button" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-3 rounded-lg transition shadow-md shadow-emerald-900/40">Send reset link</button>
+<button id="forgot-back" type="button" class="w-full bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-white text-sm font-semibold py-3 rounded-lg transition">Back to sign in</button>
+</div>
+<div id="reset-panel" class="hidden space-y-3">
+<p class="text-sm text-gray-400">Choose a new password for your account.</p>
+<div class="space-y-1.5">
+<label for="new-password" class="text-xs font-medium text-gray-400 uppercase tracking-wider">New password</label>
+<input id="new-password" type="password" autocomplete="new-password" placeholder="••••••••" class="w-full bg-[#1a1a1a] text-gray-100 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800" />
+</div>
+<div class="space-y-1.5">
+<label for="new-password-2" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Confirm password</label>
+<input id="new-password-2" type="password" autocomplete="new-password" placeholder="••••••••" class="w-full bg-[#1a1a1a] text-gray-100 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800" />
+</div>
+<button id="reset-submit-btn" type="button" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-3 rounded-lg transition shadow-md shadow-emerald-900/40">Set new password</button>
+</div>
 <p id="auth-error" class="text-xs text-red-400 text-center hidden"></p>
+<p id="auth-notice" class="text-xs text-emerald-400 text-center hidden"></p>
 <p class="text-center text-xs text-gray-600">Your hands stay private — nothing is shared unless you choose.</p>
+<p class="text-center text-xs"><a href="https://discord.gg/KB4rNwnea" target="_blank" rel="noopener" class="text-gray-500 hover:text-emerald-400 transition">Join our Discord</a></p>
 </div>
 </div>
 
@@ -82,6 +108,7 @@ input, textarea, select { font-size: 16px; }
 </div>
 
 <div id="chat-view" class="hidden flex-1 flex flex-col min-h-0">
+<div id="session-banner" class="hidden px-4 pt-2"></div>
 <main id="chatbox" class="flex-1 overflow-y-auto p-4 space-y-4 bg-black min-h-0">
 <div class="flex items-start">
 <div class="bg-[#1a1a1a] text-gray-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">
@@ -90,6 +117,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 </main>
 <footer id="chat-footer" class="p-3 pb-[calc(env(safe-area-inset-bottom)+96px)] bg-black/90 border-t border-neutral-800 flex-shrink-0">
+<div id="quick-chips" class="hidden flex items-center gap-2 mb-2 overflow-x-auto no-scrollbar"></div>
 <form id="chat-form" class="flex items-center gap-2" onsubmit="sendMessage(event)">
 <input id="user-input" type="text" placeholder="Type your hand..." autocomplete="off" class="flex-1 bg-[#1a1a1a] text-gray-100 text-sm rounded-full px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800 transition placeholder-gray-500" />
 <button type="submit" id="send-btn" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white p-3 rounded-full transition shadow-md flex items-center justify-center disabled:opacity-50">
@@ -111,6 +139,42 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 
 <div id="social-view" class="hidden flex-1 overflow-y-auto p-4 space-y-4 pb-20">
 <p class="text-sm text-gray-500 text-center py-8">No friends yet.</p>
+</div>
+
+<div id="onboarding" class="hidden fixed inset-0 z-50 bg-black/95 backdrop-blur flex-col items-center justify-center p-6">
+<div class="w-full max-w-sm space-y-5">
+<div class="flex flex-col items-center text-center space-y-3">
+<div class="w-20 h-20 rounded-2xl overflow-hidden ring-2 ring-emerald-500/40 shadow-lg shadow-emerald-500/10">
+<img src="/logo-512.png" alt="AI Holdem Coach logo" class="w-full h-full object-cover" />
+</div>
+<h2 class="text-xl font-bold">Welcome to AI Holdem Coach</h2>
+<p class="text-sm text-gray-500">Three things you can do:</p>
+</div>
+<div class="space-y-3">
+<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-1 border border-neutral-800">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-lg bg-emerald-600 text-xs font-bold flex items-center justify-center text-white">1</span>
+<h3 class="text-sm font-semibold text-gray-200">Coach</h3>
+</div>
+<p class="text-xs text-gray-500 pl-8">Paste any hand — cards, board, position — and get an instant read with tier and strength.</p>
+</div>
+<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-1 border border-neutral-800">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-lg bg-emerald-600 text-xs font-bold flex items-center justify-center text-white">2</span>
+<h3 class="text-sm font-semibold text-gray-200">Track</h3>
+</div>
+<p class="text-xs text-gray-500 pl-8">Log hands, buy-ins, wins, and losses. At the end of the night say "done" and confirm your buy-in and cash-out.</p>
+</div>
+<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-1 border border-neutral-800">
+<div class="flex items-center gap-2">
+<span class="w-6 h-6 rounded-lg bg-emerald-600 text-xs font-bold flex items-center justify-center text-white">3</span>
+<h3 class="text-sm font-semibold text-gray-200">Stats + Social</h3>
+</div>
+<p class="text-xs text-gray-500 pl-8">See real profit, ROI, and buy-in trends. Add friends and compare on a leaderboard.</p>
+</div>
+</div>
+<button id="onb-done-btn" type="button" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-3 rounded-lg transition shadow-md shadow-emerald-900/40">Got it — let's play</button>
+</div>
 </div>
 </div>
 <nav id="bottom-nav" class="hidden fixed bottom-0 left-0 right-0 bg-black/90 border-t border-neutral-800 backdrop-blur flex justify-around py-2 pb-6 z-10">
