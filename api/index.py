@@ -210,6 +210,8 @@ def run_pipeline(user_input, mode, user_id=None):
                     parsed = json.loads(result)
                 except:
                     pass
+                if parsed.get("result") is not None:
+                    parsed["result"] = "won" if str(parsed["result"]).lower() in ("won", "win", "w") else "lost"
             if tc.function.name == "record_buyin" and mode == "track":
                 try:
                     sid = get_or_create_session(user_id)

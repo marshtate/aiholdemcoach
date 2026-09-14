@@ -476,6 +476,7 @@ el.innerHTML = `<div class="space-y-3">
 </div>`;
 renderHandList();
 }
+function isWon(r) { return ['won','win','w'].includes((r||'').toLowerCase()); }
 function applyHandFilters() { renderHandList(); }
 function renderHandList() {
 const listEl = document.getElementById('hist-list');
@@ -485,7 +486,7 @@ const q = (document.getElementById('hist-search').value || '').toLowerCase().tri
 const rf = document.getElementById('hist-result').value;
 const tf = document.getElementById('hist-tier').value;
 const entries = allEntries.filter(e => {
-if (rf && (e.result || '') !== rf) return false;
+if (rf && !(isWon(e.result) === (rf === 'won'))) return false;
 if (tf && e.tier && e.tier.toLowerCase() !== tf) return false;
 if (tf && !e.tier) return false;
 if (q) {
@@ -507,8 +508,8 @@ top += '</div>';
 let resultHTML = '';
 if (e.result) {
 resultHTML = `<div class="flex items-center gap-2 pt-1 border-t border-neutral-800 mt-1">
-<span class="text-xs font-semibold ${e.result === 'won'? 'text-emerald-400': 'text-red-400'}">${e.result === 'won'? 'Won': 'Lost'}</span>
-${e.amount? `<span class="text-xs ${e.result === 'won'? 'text-emerald-400': 'text-red-400'}">$${e.amount.toFixed(2)}</span>`: ''}
+<span class="text-xs font-semibold ${isWon(e.result)? 'text-emerald-400': 'text-red-400'}">${isWon(e.result)? 'Won': 'Lost'}</span>
+${e.amount? `<span class="text-xs ${isWon(e.result)? 'text-emerald-400': 'text-red-400'}">$${e.amount.toFixed(2)}</span>`: ''}
 </div>`;
 }
 return `<div id="hist-${e.id}" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">${top}<p class="text-sm text-gray-300">${e.reply}</p>${resultHTML}</div>`;
@@ -525,7 +526,7 @@ card.innerHTML = `<div class="space-y-2">
 </div>
 <div class="flex gap-2">
 <input id="ea-${id}" value="${e.player_action || ''}" placeholder="Action" class="flex-1 bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" />
-<select id="er-${id}" class="bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none"><option value="">—</option><option value="won" ${e.result === 'won' ? 'selected' : ''}>Won</option><option value="lost" ${e.result === 'lost' ? 'selected' : ''}>Lost</option></select>
+<select id="er-${id}" class="bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none"><option value="">—</option><option value="won" ${isWon(e.result)? 'selected': ''}>Won</option><option value="lost" ${e.result && !isWon(e.result) ? 'selected': ''}>Lost</option></select>
 <input id="eamt-${id}" type="number" value="${e.amount || ''}" placeholder="$" class="w-16 bg-black text-gray-300 text-xs rounded px-2 py-1.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" />
 </div>
 <div class="flex items-center gap-2 pt-1">
@@ -920,7 +921,7 @@ let left = h.hand || '?';
 if (h.position) left += ' / ' + h.position;
 if (h.player_action) left += ' / ' + h.player_action;
 let right = '';
-if (h.result) { const w = h.result === 'won'; right += `<span class="${w ? 'text-emerald-400' : 'text-red-400'}">${w ? 'Won' : 'Lost'}</span>`; }
+if (h.result) { const w = isWon(h.result); right += `<span class="${w ? 'text-emerald-400' : 'text-red-400'}">${w ? 'Won' : 'Lost'}</span>`; }
 if (h.amount) right += ` <span class="text-gray-400">$${h.amount.toFixed(2)}</span>`;
 return `<div class="flex justify-between text-xs py-1 border-b border-neutral-800 last:border-0"><span class="text-emerald-400 font-semibold">${left}</span><span>${right}</span></div>`;
 }).join('')}
