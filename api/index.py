@@ -183,7 +183,7 @@ def format_track(parsed, session=None, closed=False, logged_hands=None, units="d
 	if logged_hands:
 		out = []
 		for h in logged_hands:
-			parts = [h.get("hand") or "?"]
+			parts = [h.get("hand") or (session.get("hand") if session else None) or "?"]
 			if h.get("position"): parts.append(h["position"])
 			if h.get("action"): parts.append(h["action"])
 			if h.get("result"): parts.append("won" if str(h["result"]).lower() in ("won", "win", "w") else "lost")
@@ -232,12 +232,17 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
                     parsed["result"] = "won" if str(parsed["result"]).lower() in ("won", "win", "w") else "lost"
             if tc.function.name == "log_hand":
                 hs = parsed.get("hands")
+                ctx_hand = session.get("hand") if session else None
                 if isinstance(hs, list) and hs:
                     for h in hs:
                         if h.get("result") is not None:
                             h["result"] = "won" if str(h["result"]).lower() in ("won", "win", "w") else "lost"
+                        if not h.get("hand") and ctx_hand:
+                            h["hand"] = ctx_hand
                         logged_hands.append(h)
-                elif parsed.get("hand"):
+                elif parsed.get("hand") or ctx_hand:
+                    if not parsed.get("hand") and ctx_hand:
+                        parsed["hand"] = ctx_hand
                     logged_hands.append(parsed)
             if tc.function.name == "record_buyin" and mode == "track":
                 try:
