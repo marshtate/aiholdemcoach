@@ -12,6 +12,7 @@
 <style>.tab-active { color: #34d399; border-bottom: 2px solid #34d399; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #d4a017; }.tier-strong { background: #b8860b; }.tier-playable { background: #059669; }.tier-speculative { background: #047857; }.tier-trash { background: #404040; }.mode-active { background: #059669; color: white; }.mode-inactive { background: #1a1a1a; color: #94a3b8; }.bar { height: 6px; border-radius: 3px; transition: width 0.4s ease; }.pulse-green { animation: pgreen 2s infinite; }
 @keyframes pgreen { 0%,100%{opacity:1} 50%{opacity:0.5} }
 #chatbox { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+#chat-footer.kb-open { padding-bottom: calc(env(safe-area-inset-bottom) + 12px) !important; }
 input, textarea, select { font-size: 16px; }
 </style>
 </head>
@@ -62,7 +63,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 </div>
 </main>
-<footer class="p-3 pb-[calc(env(safe-area-inset-bottom)+96px)] bg-black/90 border-t border-neutral-800 flex-shrink-0">
+<footer id="chat-footer" class="p-3 pb-[calc(env(safe-area-inset-bottom)+96px)] bg-black/90 border-t border-neutral-800 flex-shrink-0">
 <form id="chat-form" class="flex items-center gap-2" onsubmit="sendMessage(event)">
 <input id="user-input" type="text" placeholder="Type your hand..." autocomplete="off" class="flex-1 bg-[#1a1a1a] text-gray-100 text-sm rounded-full px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800 transition placeholder-gray-500" />
 <button type="submit" id="send-btn" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white p-3 rounded-full transition shadow-md flex items-center justify-center disabled:opacity-50">
@@ -489,8 +490,9 @@ finally { input.disabled = false; sendBtn.disabled = false; input.blur(); setTim
 }
 var nav = document.getElementById('bottom-nav');
 var kbInput = document.getElementById('user-input');
-function hideNav() { nav.classList.add('hidden'); }
-function showNav() { nav.classList.remove('hidden'); }
+var kbFooter = document.getElementById('chat-footer');
+function hideNav() { nav.classList.add('hidden'); kbFooter.classList.add('kb-open'); }
+function showNav() { nav.classList.remove('hidden'); kbFooter.classList.remove('kb-open'); }
 kbInput.addEventListener('focus', hideNav);
 kbInput.addEventListener('blur', function() { setTimeout(showNav, 250); });
 </script>
