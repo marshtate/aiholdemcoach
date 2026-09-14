@@ -54,7 +54,8 @@ const { data, error } = await sb.auth.signUp({ email, password });
 if (error) { showError(error.message); return; }
 if (data.session) showApp(); else showError('Account created. Check email to confirm.');
 });
-document.getElementById('signin-btn').addEventListener('click', async () => {
+document.getElementById('auth-form').addEventListener('submit', async (ev) => {
+ev.preventDefault();
 const email = document.getElementById('email').value, password = document.getElementById('password').value;
 if (!email ||!password) { showError('Enter email and password.'); return; }
 const { data, error } = await sb.auth.signInWithPassword({ email, password });
