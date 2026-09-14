@@ -62,7 +62,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 </div>
 </main>
-<footer class="p-3 pb-16 bg-black/90 border-t border-neutral-800 flex-shrink-0">
+<footer class="p-3 pb-[calc(env(safe-area-inset-bottom)+96px)] bg-black/90 border-t border-neutral-800 flex-shrink-0">
 <form id="chat-form" class="flex items-center gap-2" onsubmit="sendMessage(event)">
 <input id="user-input" type="text" placeholder="Type your hand..." autocomplete="off" class="flex-1 bg-[#1a1a1a] text-gray-100 text-sm rounded-full px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800 transition placeholder-gray-500" />
 <button type="submit" id="send-btn" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white p-3 rounded-full transition shadow-md flex items-center justify-center disabled:opacity-50">
@@ -485,26 +485,14 @@ cachedHistory = null;
 cachedHistory = null;
 }
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
-finally { input.disabled = false; sendBtn.disabled = false; input.focus(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
+finally { input.disabled = false; sendBtn.disabled = false; input.blur(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
 }
 var nav = document.getElementById('bottom-nav');
 var kbInput = document.getElementById('user-input');
 function hideNav() { nav.classList.add('hidden'); }
 function showNav() { nav.classList.remove('hidden'); }
-var layoutH = window.innerHeight;
-if (window.visualViewport) {
-var vv = window.visualViewport;
-var prevKy = false;
-function navSync() {
-var ky = vv.height < layoutH;
-if (ky && !prevKy) hideNav();
-if (!ky && prevKy) showNav();
-prevKy = ky;
-}
-vv.addEventListener('resize', navSync);
-}
-kbInput.addEventListener('focus', function() { prevKy = true; hideNav(); });
-kbInput.addEventListener('blur', function() { setTimeout(function() { if (!window.visualViewport || window.visualViewport.height >= layoutH) showNav(); }, 300); });
+kbInput.addEventListener('focus', hideNav);
+kbInput.addEventListener('blur', function() { setTimeout(showNav, 250); });
 </script>
 </body>
 </html>
