@@ -136,7 +136,7 @@ def session_buyin_total(session_id):
 tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
 {"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": ["string", "null"], "description": "UTG, MP, CO, BTN, SB, BB."}}, "required": ["card1", "card2"]}}},
-{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result. If the player's message contains MULTIPLE hands (e.g. 'won AKo, then lost 77'), put ALL of them in the hands array at once - one object per hand.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ (only the ONE hand if there is only one)"}, "position": {"type": ["string", "null"], "description": "Optional position"}, "action": {"type": ["string", "null"], "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": ["string", "null"], "description": "Optional: won or lost"}, "amount": {"type": ["number", "null"], "description": "Optional: amount won or lost"}, "hands": {"type": ["array", "null"], "items": {"type": "object", "properties": {"hand": {"type": "string"}, "position": {"type": ["string", "null"]}, "action": {"type": ["string", "null"]}, "result": {"type": ["string", "null"]}, "amount": {"type": ["number", "null"]}}, "required": ["hand"]}, "description": "Multiple hands at once: one object per hand. Use this whenever the message mentions more than one hand."}}, "required": []}}} ,
+{"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result. If the player's message contains MULTIPLE hands (e.g. 'won AKo, then lost 77'), put ALL of them in the hands array at once - one object per hand. OMIT the hand/position only when the player's message gives NO hole cards - the system attaches their most recent hand.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ (only the ONE hand if there is only one). Leave OUT only when no hole cards were given."}, "position": {"type": ["string", "null"], "description": "Optional position"}, "action": {"type": ["string", "null"], "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": ["string", "null"], "description": "Optional: won or lost"}, "amount": {"type": ["number", "null"], "description": "Optional: amount won or lost"}, "hands": {"type": ["array", "null"], "items": {"type": "object", "properties": {"hand": {"type": "string"}, "position": {"type": ["string", "null"]}, "action": {"type": ["string", "null"]}, "result": {"type": ["string", "null"]}, "amount": {"type": ["number", "null"]}}, "required": ["hand"]}, "description": "Multiple hands at once: one object per hand. Use this whenever the message mentions more than one hand."}}, "required": []}}} ,
 {"type": "function", "function": {"name": "close_session", "description": "Close the player's session with either their total profit or loss, OR their cashout amount. If the player says they were up/down X, pass profit (positive for profit, negative for loss). If they say they cashed out X, pass cashout.", "parameters": {"type": "object", "properties": {"profit": {"type": ["number", "null"], "description": "Total profit (positive) or loss (negative) in dollars"}, "cashout": {"type": ["number", "null"], "description": "Total amount cashed out at the end of the session in dollars"}}, "required": []}}},
 {"type": "function", "function": {"name": "record_buyin", "description": "Record a buy-in or re-buy for the current session.", "parameters": {"type": "object", "properties": {"amount": {"type": "number", "description": "Dollar amount of this buy-in or re-buy"}}, "required": ["amount"]}}},
 ]
@@ -153,7 +153,7 @@ def get_session_context(user_id):
     return None
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. Never drop a result or amount the player mentions. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. Never drop a result or amount the player mentions. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If the player's message names NO hole cards at all (e.g. just 'lost 35', 'won the pot', 'flop came 8 7 2'), leave the hand field OUT of log_hand - the system attaches their most recent hand itself. Only respond 'What hand were you holding?' when the player gives no cards and there is no previous hand to attach."
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
@@ -169,12 +169,6 @@ def build_system(mode, session=None):
 			for s in streets:
 				if s: base += f" then: '{s}'."
 		base += " Continuation - if they describe a board, use evaluate_poker_hand with hole cards plus ALL cards mentioned."
-	elif session and session.get("hand") and mode == "track":
-		hand = session["hand"]
-		pos = session.get("position", "")
-		base += f" CONTEXT - an earlier hand this player logged was {hand}"
-		if pos: base += f" from {pos}"
-		base += f". Only reuse {hand} when the player's message REPEATS it, or clearly continues that exact hand without naming any different cards. CRITICAL RULES: (1) If the message names ANY hole cards - e.g. AKo, 77, TT, QJ, 72s - those are NEW hands and you MUST log exactly those cards - never {hand} for them. (2) If several different hands are mentioned, log EVERY one in the hands array - never skip any. (3) Log every result and amount the player mentions next to a hand. (4) When new cards are named, base your log ENTIRELY on those cards and ignore {hand}."
 	return {"role": "system", "content": base}
 
 def format_track(parsed, session=None, closed=False, logged_hands=None, units="dollars"):
@@ -391,13 +385,19 @@ async def chat_endpoint(req: Request):
     reply, parsed, session, tool_called, closed, logged_hands = run_pipeline(user_input, mode, user_id, body.get("units", "dollars"))
     if user_id and tool_called and not closed and not parsed.get("buyin"):
         batch = logged_hands if logged_hands else [parsed]
-        if any(b.get("hand") for b in batch):
+        if any(b.get("hand") or b.get("result") or b.get("amount") for b in batch):
             try:
                 session_id = get_or_create_session(user_id) if mode == "track" else None
                 prev_hand = session.get("hand") if session else None
                 single = len(batch) == 1
                 for bh in batch:
-                    row_hand = bh.get("hand") or prev_hand
+                    row_hand = bh.get("hand")
+                    if not row_hand and mode == "track" and prev_hand:
+                        named_cards = bool(re.search(r"(?i)\b[2-9tjqka]{2}[oOsS]?\b", user_input))
+                        if not named_cards:
+                            row_hand = prev_hand
+                    if not row_hand:
+                        continue
                     row = {
                         "user_id": user_id,
                         "input": user_input,
