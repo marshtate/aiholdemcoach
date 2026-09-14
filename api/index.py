@@ -267,6 +267,65 @@ def run_pipeline(user_input, mode, user_id=None):
     except Exception:
         return format_track(parsed, session), parsed, session, tool_called, False
     return msg.content, parsed, session, tool_called, False
+def recap_turn(user_input, user_id, session_id):
+    try:
+        if session_id:
+            sres = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status").eq("user_id", user_id).eq("id", session_id).execute()
+            sess = sres.data[0] if (sres.data and sres.data[0]) else None
+            if not sess:
+                return "That session isn't available.", None
+        else:
+            sres = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status").eq("user_id", user_id).eq("status", "closed").order("closed_at", desc=True).limit(1).execute()
+            sess = sres.data[0] if (sres.data and sres.data[0]) else None
+            if not sess:
+                return "No completed session to recap yet.", None
+        sid = sess["id"]
+        hr = supabase.table("messages").select("hand, position, player_action, result, amount, input, created_at").eq("session_id", sid).eq("user_id", user_id).order("created_at", asc=True).execute()
+        hands = [h for h in (hr.data or []) if h.get("hand")][:30]
+        if not hands:
+            return "That session has no logged hands to recap yet.", sid
+        buyin_total = session_buyin_total(sid)
+        lines = []
+        for i, h in enumerate(hands, 1):
+            parts = [h.get("hand", "?")]
+            if h.get("position"): parts.append(h["position"])
+            if h.get("player_action"): parts.append(h["player_action"])
+            if h.get("result"):
+                r = h["result"]
+                if h.get("amount"): r += f" ${h['amount']}"
+                parts.append(r)
+            lines.append(f"{i}. " + " / ".join(parts))
+        hand_text = "\n".join(lines)
+        summary = (f"Buy-ins: ${buyin_total:.2f} total. Cashed out: ${(sess.get('cashout') or 0):.2f}. "
+                   f"Net: ${(sess.get('profit') or 0):+.2f}. Played from {sess.get('created_at')} to {sess.get('closed_at')}.")
+        system = ("You are a poker coach doing a post-session recap. The user just finished a tracking session. "
+                  "Use ONLY the hands listed below - they are exactly what was played. Go through them and point out "
+                  "errors and missed opportunities: leaks, sizing, positions, folding too much or too little, passive play. "
+                  "Be specific and friendly, like a trusted friend texting advice. For your first message give an honest "
+                  "short verdict plus 1-2 concrete things to fix. Then answer follow-ups about these hands in 2-3 short "
+                  "sentences. Never log or save anything - this is conversation only.\n\n"
+                  f"SESSION\n{summary}\n\nHANDS PLAYED\n{hand_text}")
+        hist = supabase.table("recap_messages").select("role, content").eq("session_id", sid).eq("user_id", user_id).order("created_at", asc=True).limit(40).execute()
+        msgs = [{"role": "system", "content": system}]
+        for m in (hist.data or []):
+            msgs.append({"role": m["role"], "content": m["content"]})
+        msgs.append({"role": "user", "content": user_input})
+        try:
+            resp = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=msgs)
+            reply = resp.choices[0].message.content or ""
+        except Exception as e:
+            return f"AI error: {str(e)}", sid
+        try:
+            supabase.table("recap_messages").insert([
+                {"session_id": sid, "user_id": user_id, "role": "user", "content": user_input},
+                {"session_id": sid, "user_id": user_id, "role": "assistant", "content": reply},
+            ]).execute()
+        except Exception as exc:
+            discord_ping(f"recap insert: {exc}")
+        return reply, sid
+    except Exception as exc:
+        discord_ping(f"recap_turn: {exc}")
+        return "Could not recap that session.", None
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
     if not startup_ok:
@@ -287,6 +346,11 @@ async def chat_endpoint(req: Request):
                 user_id = resp.user.id
         except:
             pass
+    if mode == "recap":
+        if not user_id:
+            return {"reply": "Sign in to recap a session."}
+        reply, rid = recap_turn(user_input, user_id, body.get("session_id"))
+        return {"reply": reply, "parsed": {}, "recap_session_id": rid}
     reply, parsed, session, tool_called, closed = run_pipeline(user_input, mode, user_id)
     if user_id and tool_called and not closed and not parsed.get("buyin"):
         try:

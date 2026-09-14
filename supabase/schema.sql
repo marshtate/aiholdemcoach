@@ -33,8 +33,17 @@ create table if not exists public.buyins (
   amount numeric not null,
   created_at timestamptz not null default now()
 );
-
 create index if not exists buyins_session_idx on public.buyins (session_id);
 create index if not exists buyins_user_idx on public.buyins (user_id);
-
 alter table public.buyins enable row level security;
+
+create table if not exists public.recap_messages (
+  id bigserial primary key,
+  session_id bigint not null references public.sessions(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role text not null,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists recap_session_idx on public.recap_messages (session_id);
+alter table public.recap_messages enable row level security;

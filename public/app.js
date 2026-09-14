@@ -9,6 +9,8 @@ const appHeader = document.getElementById('app-header');
 const modeToggle = document.getElementById('mode-toggle-header');
 let currentMode = 'coach';
 let cachedHistory = null;
+let recapActive = false;
+let recapSessionId = null;
 
 function showApp() {
 document.getElementById('bottom-nav').classList.remove('hidden');
@@ -147,12 +149,14 @@ const modeTrackBtn = document.getElementById('mode-track-btn');
 
 modeCoachBtn.addEventListener('click', () => {
 currentMode = 'coach';
+recapActive = false;
 modeCoachBtn.className = modeCoachBtn.className.replace('mode-inactive', 'mode-active');
 modeTrackBtn.className = modeTrackBtn.className.replace('mode-active', 'mode-inactive');
 resetChat();
 });
 modeTrackBtn.addEventListener('click', () => {
 currentMode = 'track';
+recapActive = false;
 modeTrackBtn.className = modeTrackBtn.className.replace('mode-inactive', 'mode-active');
 modeCoachBtn.className = modeCoachBtn.className.replace('mode-active', 'mode-inactive');
 resetChat();
@@ -175,13 +179,42 @@ const chipDefs = [
 ];
 function renderQuickChips() {
 const chips = document.getElementById('quick-chips');
-if (currentMode !== 'track') { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
+if (currentMode !== 'track' || recapActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
 chips.innerHTML = chipDefs.map(c => `<button type="button" data-fill="${c.fill}" class="flex-shrink-0 bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-gray-300 text-xs font-medium px-3 py-1.5 rounded-full transition">${c.label}</button>`).join('');
+if (recapSessionId && !recapActive) {
+chips.innerHTML += `<button type="button" data-action="recap" class="flex-shrink-0 border border-emerald-600 text-emerald-400 hover:bg-emerald-600 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-full transition">Recap session</button>`;
+}
 chips.classList.remove('hidden');
 }
+async function offerRecap() {
+if (recapActive) return;
+const sessions = await fetchSessions();
+const closed = sessions.find(s => s.status === 'closed');
+if (!closed) { recapSessionId = null; return; }
+recapSessionId = closed.id;
+renderQuickChips();
+}
+async function startRecap() {
+if (!recapSessionId || recapActive) return;
+recapActive = true;
+const chatbox = document.getElementById('chatbox');
+chatbox.innerHTML = `<div class="flex items-start"><div class="bg-purple-900/40 text-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">Recap mode - I'll go over your finished session, hand by hand. This conversation doesn't touch your logged hands or stats.</div></div>`;
+const banner = document.getElementById('session-banner');
+banner.innerHTML = `<div class="bg-purple-900/30 border border-purple-800 rounded-xl px-3 py-2 flex items-center gap-2">
+<span class="text-xs font-semibold text-purple-400">Recap session</span>
+<span class="ml-auto text-xs text-gray-500">won't affect your stats</span>
+</div>`;
+banner.classList.remove('hidden');
+document.getElementById('quick-chips').classList.add('hidden');
+const inp = document.getElementById('user-input');
+inp.placeholder = 'Ask about the session...';
+inp.value = 'Review my session. Where did I play well, and where did I lose value?';
+document.getElementById('chat-form').requestSubmit();
+}
 document.getElementById('quick-chips').addEventListener('click', (e) => {
-const btn = e.target.closest('button[data-fill]');
+const btn = e.target.closest('button[data-fill], button[data-action]');
 if (!btn) return;
+if (btn.dataset.action === 'recap') { startRecap(); return; }
 const inp = document.getElementById('user-input');
 inp.value = btn.dataset.fill;
 inp.focus();
@@ -189,7 +222,8 @@ chatbox.scrollTop = chatbox.scrollHeight;
 });
 async function refreshSessionBanner() {
 const banner = document.getElementById('session-banner');
-if (!banner || currentMode !== 'track') { if (banner) banner.classList.add('hidden'); return; }
+if (!banner || recapActive) return;
+if (currentMode !== 'track') { banner.classList.add('hidden'); return; }
 const sessions = await fetchSessions();
 const open = sessions.find(s => s.status === 'open');
 if (open) {
@@ -552,15 +586,20 @@ e.preventDefault(); const text = input.value.trim(); if (!text) return;
 appendMessage(text, true); input.value = ''; input.disabled = true; sendBtn.disabled = true;
 const lb = appendMessage('...', false);
 const { data: { session } } = await sb.auth.getSession();
+const mode = recapActive ? 'recap' : currentMode;
+const body = { message: text, mode };
+if (recapActive && recapSessionId) body.session_id = recapSessionId;
 try {
 const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] = 'Bearer ' + session.access_token;
-const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify({ message: text, mode: currentMode }) });
+const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify(body) });
 const data = await res.json();
 lb.textContent = data.reply || data.error || 'No response.';
-cachedHistory = null;
-if (data.reply && data.reply.includes('Session closed')) {
+if (!recapActive) cachedHistory = null;
+if (data.reply && data.reply.includes('Session closed') && !recapActive) {
 checkSession();
+offerRecap();
 }
+if (recapActive && data.recap_session_id) recapSessionId = data.recap_session_id;
 refreshSessionBanner();
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
 finally { input.disabled = false; sendBtn.disabled = false; input.blur(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
