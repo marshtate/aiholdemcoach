@@ -294,6 +294,10 @@ const winRate = closed.length > 0? Math.round((wins / closed.length) * 100): nul
 const profitStr = totalProfit >= 0? '+$' + totalProfit.toFixed(2): '-$' + Math.abs(totalProfit).toFixed(2);
 const avgProfit = closed.length > 0? (totalProfit / closed.length): 0;
 const avgStr = avgProfit >= 0? '+$' + avgProfit.toFixed(2): '-$' + Math.abs(avgProfit).toFixed(2);
+const totalBuyins = closed.reduce((sum, s) => sum + (s.buyins || 0), 0);
+const totalCashouts = closed.reduce((sum, s) => sum + (s.cashout || 0), 0);
+const roi = totalBuyins > 0 ? (totalProfit / totalBuyins) * 100 : null;
+const roiStr = roi === null ? '-' : (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%';
 
 let html = '';
 if (open) {
@@ -318,7 +322,12 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${totalProfit >= 0? 'text-emerald-400': 'text-red-400'}">${profitStr}</p><p class="text-xs text-gray-500">Total profit</p></div>
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-amber-400">${winRate}%</p><p class="text-xs text-gray-500">Win rate</p></div>
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${avgProfit >= 0? 'text-emerald-400': 'text-red-400'}">${avgStr}</p><p class="text-xs text-gray-500">Avg per night</p></div>
-</div>
+</div>${totalBuyins > 0 ? `<div class="grid grid-cols-2 gap-3">
+<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalBuyins.toFixed(2)}</p><p class="text-xs text-gray-500">Total buy-ins</p></div>
+<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalCashouts.toFixed(2)}</p><p class="text-xs text-gray-500">Total cashouts</p></div>
+<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${roi >= 0? 'text-emerald-400': 'text-red-400'}">${roiStr}</p><p class="text-xs text-gray-500">ROI</p></div>
+<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${(totalBuyins / closed.length).toFixed(2)}</p><p class="text-xs text-gray-500">Avg buy-in</p></div>
+</div>` : ''}
 </div>`;
 const recent = closed.slice(0, 5).reverse();
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
@@ -326,7 +335,8 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
 ${recent.map(s => {
 const d = new Date(s.closed_at || s.created_at).toLocaleDateString();
 const p = s.profit || 0;
-return `<div class="flex justify-between items-center text-xs"><span class="text-gray-400">${d}</span><span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span></div>`;
+const nit = s.buyins ? `<span class="text-gray-500">$${(s.buyins)} in</span> ` : '';
+return `<div class="flex justify-between items-center text-xs"><span class="text-gray-400">${d}</span><div class="flex items-center gap-2"><span class="text-gray-600">${nit}</span><span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span></div></div>`;
 }).join('')}
 </div>`;
 } else {
@@ -433,6 +443,15 @@ html += `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font
 html += `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">${stats.streak}</p><p class="text-xs text-gray-500">Win streak</p></div>`;
 }
 html += '</div>';
+if (stats.total_buyins) {
+html += `<div class="grid grid-cols-2 gap-2">`;
+const roi = stats.roi === null || stats.roi === undefined ? '-' : stats.roi + '%';
+html += `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">${money(stats.total_buyins)}</p><p class="text-xs text-gray-500">Buy-ins</p></div>`;
+html += `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">${money(stats.total_cashouts)}</p><p class="text-xs text-gray-500">Cashouts</p></div>`;
+html += `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${stats.roi >= 0 ? 'text-emerald-400' : 'text-red-400'}">${roi}</p><p class="text-xs text-gray-500">ROI</p></div>`;
+html += `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">${money(stats.total_buyins / stats.nights)}</p><p class="text-xs text-gray-500">Avg buy-in</p></div>`;
+html += '</div>';
+}
 return html;
 }
 let mySocial = null;

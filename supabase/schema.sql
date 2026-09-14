@@ -22,3 +22,19 @@ create index if not exists friends_friend_id_idx on public.friends (friend_id);
 
 alter table public.profiles enable row level security;
 alter table public.friends enable row level security;
+
+-- Buy-in & cashout tracking (added for true-profit stats)
+alter table public.sessions add column if not exists cashout numeric;
+
+create table if not exists public.buyins (
+  id bigserial primary key,
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  amount numeric not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists buyins_session_idx on public.buyins (session_id);
+create index if not exists buyins_user_idx on public.buyins (user_id);
+
+alter table public.buyins enable row level security;

@@ -72,8 +72,11 @@ def preflop_advice(card1, card2, position="BTN"):
 def log_hand(hand, position=None, action=None, result=None, amount=None):
 	return json.dumps({"hand": hand, "position": position, "action": action, "result": result, "amount": amount})
 
-def close_session(profit):
-	return json.dumps({"closed": True, "profit": profit})
+def close_session(profit=None, cashout=None):
+	return json.dumps({"closed": True, "profit": profit, "cashout": cashout})
+
+def record_buyin(amount):
+	return json.dumps({"buyin": True, "amount": amount})
 
 def get_or_create_session(user_id):
 	try:
@@ -87,14 +90,24 @@ def get_or_create_session(user_id):
 		pass
 	return None
 
+def session_buyin_total(session_id):
+	if not session_id:
+		return 0
+	try:
+		res = supabase.table("buyins").select("amount").eq("session_id", session_id).execute()
+		return round(sum(r.get("amount") or 0 for r in (res.data or [])), 2)
+	except:
+		return 0
+
 tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
 {"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": "string", "description": "UTG, MP, CO, BTN, SB, BB."}}, "required": ["card1", "card2"]}}},
 {"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ"}, "position": {"type": "string", "description": "Optional position"}, "action": {"type": "string", "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": "string", "description": "Optional: won or lost"}, "amount": {"type": "number", "description": "Optional: dollar amount"}}, "required": ["hand"]}}},
-{"type": "function", "function": {"name": "close_session", "description": "Close the player's session with their total profit or loss for the night.", "parameters": {"type": "object", "properties": {"profit": {"type": "number", "description": "Total profit (positive) or loss (negative) in dollars"}}, "required": ["profit"]}}},
+{"type": "function", "function": {"name": "close_session", "description": "Close the player's session with either their total profit or loss, OR their cashout amount. If the player says they were up/down X, pass profit (positive for profit, negative for loss). If they say they cashed out X, pass cashout.", "parameters": {"type": "object", "properties": {"profit": {"type": "number", "description": "Total profit (positive) or loss (negative) in dollars"}, "cashout": {"type": "number", "description": "Total amount cashed out at the end of the session in dollars"}}, "required": []}}},
+{"type": "function", "function": {"name": "record_buyin", "description": "Record a buy-in or re-buy for the current session.", "parameters": {"type": "object", "properties": {"amount": {"type": "number", "description": "Dollar amount of this buy-in or re-buy"}}, "required": ["amount"]}}},
 ]
 
-available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand, "close_session": close_session}
+available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand, "close_session": close_session, "record_buyin": record_buyin}
 def get_session_context(user_id):
     try:
         result = supabase.table("messages").select("hand, position, input").eq("user_id", user_id).order("created_at", desc=True).limit(1).execute()
@@ -106,7 +119,7 @@ def get_session_context(user_id):
     return None
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they tell you their total for the night - profit or loss - call close_session with that number, positive for profit, negative for loss. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - close their session with profit 0. Respond ONLY with: 'Session closed - [profit/loss].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with a dollar amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - close their session with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' Never give advice. Never judge a hand's quality. If they don't state exact hole cards and this is a new conversation - no hand mentioned before - do NOT guess, respond 'What hand were you holding?'"
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
@@ -131,9 +144,14 @@ def build_system(mode, session=None):
 	return {"role": "system", "content": base}
 
 def format_track(parsed, session=None, closed=False):
-	if closed and parsed.get("profit") is not None:
-		p = parsed["profit"]
-		return f"Session closed - {'+' if p >= 0 else ''}{p}."
+	if parsed.get("buyin"):
+		return f"Bought in for ${parsed['amount']}."
+	if closed and (parsed.get("profit") is not None or parsed.get("cashout") is not None):
+		if parsed.get("cashout") is not None and parsed.get("profit") is None:
+			return f"Session closed - cashed out ${parsed['cashout']}."
+		p = parsed.get("profit", 0)
+		extra = f" Cashed out ${parsed['cashout']}." if parsed.get("cashout") is not None else ""
+		return f"Session closed - {'+' if p >= 0 else ''}{p}.{extra}"
 	hand = parsed.get("hand") or (session.get("hand") if session else None) or "?"
 	parts = [hand]
 	if parsed.get("position"): parts.append(parsed["position"])
@@ -166,22 +184,38 @@ def run_pipeline(user_input, mode, user_id=None):
             except Exception as e:
                 result = json.dumps({"error": f"Tool failed: {str(e)}"})
             messages.append({"tool_call_id": tc.id, "role": "tool", "name": tc.function.name, "content": result})
-            if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand", "close_session"):
+            if tc.function.name in ("preflop_advice", "evaluate_poker_hand", "log_hand", "close_session", "record_buyin"):
                 try:
                     parsed = json.loads(result)
+                except:
+                    pass
+            if tc.function.name == "record_buyin" and mode == "track":
+                try:
+                    sid = get_or_create_session(user_id)
+                    if sid and args.get("amount") is not None:
+                        supabase.table("buyins").insert({"session_id": sid, "user_id": user_id, "amount": args["amount"]}).execute()
                 except:
                     pass
             if tc.function.name == "close_session":
                 closed = True
         if mode == "track":
-            reply = format_track(parsed, session, closed)
             if closed and user_id:
                 try:
-                    open_s = supabase.table("sessions").select("id").eq("user_id", user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute()
-                    if open_s.data and open_s.data[0]:
-                        supabase.table("sessions").update({"status": "closed", "profit": parsed.get("profit"), "closed_at": "now()"}).eq("id", open_s.data[0]["id"]).execute()
+                    sid = get_or_create_session(user_id)
+                    if sid:
+                        profit = parsed.get("profit")
+                        cashout = parsed.get("cashout")
+                        if profit is None and cashout is not None:
+                            profit = round(cashout - session_buyin_total(sid), 2)
+                        if profit is not None:
+                            parsed["profit"] = profit
+                        row = {"status": "closed", "profit": parsed.get("profit"), "closed_at": "now()"}
+                        if cashout is not None:
+                            row["cashout"] = cashout
+                        supabase.table("sessions").update(row).eq("id", sid).execute()
                 except:
                     pass
+            reply = format_track(parsed, session, closed)
             return reply, parsed, session, tool_called, closed
     eval_data = ""
     if parsed.get("hand"):
@@ -276,8 +310,23 @@ async def sessions_endpoint(req: Request):
         user_id = resp.user.id
     except:
         return {"error": "unauthorized"}
-    result = supabase.table("sessions").select("id, created_at, closed_at, profit, status").eq("user_id", user_id).order("created_at", desc=True).execute()
-    return {"sessions": result.data}
+    try:
+        result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status").eq("user_id", user_id).order("created_at", desc=True).execute()
+        sessions = result.data or []
+    except:
+        sessions = []
+    sid_list = [r["id"] for r in sessions]
+    buyin_map = {}
+    if sid_list:
+        try:
+            bres = supabase.table("buyins").select("session_id, amount").in_("session_id", sid_list).execute()
+            for r in (bres.data or []):
+                buyin_map[r["session_id"]] = round(buyin_map.get(r["session_id"], 0) + (r.get("amount") or 0), 2)
+        except:
+            pass
+    for r in sessions:
+        r["buyins"] = buyin_map.get(r["id"], 0)
+    return {"sessions": sessions}
 
 @app.post("/api/result")
 async def result_endpoint(req: Request):
@@ -377,9 +426,11 @@ def usernames_for(user_ids):
 
 def session_stats(user_id):
     try:
-        res = supabase.table("sessions").select("profit, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
-        profits = [s.get("profit") for s in (res.data or []) if s.get("profit") is not None]
+        res = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
+        rows = list(res.data or [])
+        profits = [s.get("profit") for s in rows if s.get("profit") is not None]
     except:
+        rows = []
         profits = []
     nights = len(profits)
     total = sum(profits)
@@ -390,6 +441,19 @@ def session_stats(user_id):
             streak += 1
         else:
             break
+    total_buyins = 0.0
+    cashouts = []
+    if rows:
+        session_ids = {row["id"] for row in rows}
+        try:
+            bres = supabase.table("buyins").select("amount, session_id").in_("session_id", [r["id"] for r in rows]).execute()
+            for r in (bres.data or []):
+                if r.get("session_id") in session_ids:
+                    total_buyins += r.get("amount") or 0
+        except:
+            pass
+        cashouts = [s.get("cashout") for s in rows if s.get("cashout") is not None]
+    roi = round(total / total_buyins * 100, 1) if total_buyins else None
     return {
         "nights": nights,
         "total_profit": round(total, 2),
@@ -397,6 +461,9 @@ def session_stats(user_id):
         "avg_profit": round(total / nights, 2) if nights else None,
         "best_night": round(max(profits), 2) if nights else None,
         "streak": streak,
+        "total_buyins": round(total_buyins, 2),
+        "total_cashouts": round(sum(cashouts), 2),
+        "roi": roi,
     }
 
 @app.get("/api/profile")
