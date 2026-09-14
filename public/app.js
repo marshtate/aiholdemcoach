@@ -168,7 +168,7 @@ refreshSessionBanner();
 }
 const chipDefs = [
 { label: 'Won +$20', fill: 'Won $20' },
-{ label: 'Lost $20', fill: 'Lost $20' },
+{ label: 'Rebuy $5', fill: 'Bought in $5' },
 { label: 'Rebuy $20', fill: 'Bought in $20' },
 { label: 'Rebuy $100', fill: 'Bought in $100' },
 { label: 'Done', fill: 'Done for the night' }
