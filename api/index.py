@@ -168,12 +168,14 @@ def close_session(profit=None, cashout=None):
 def record_buyin(amount):
 	return json.dumps({"buyin": True, "amount": amount})
 
-def get_or_create_session(user_id):
+def get_or_create_session(user_id, units="dollars"):
 	try:
-		result = supabase.table("sessions").select("id").eq("user_id", user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute()
+		result = supabase.table("sessions").select("id, units").eq("user_id", user_id).eq("status", "open").order("created_at", desc=True).limit(1).execute()
 		if result.data and result.data[0]:
-			return result.data[0]["id"]
-		new = supabase.table("sessions").insert({"user_id": user_id}).execute()
+			row = result.data[0]
+			if (row.get("units") or "dollars") == (units or "dollars"):
+				return row["id"]
+		new = supabase.table("sessions").insert({"user_id": user_id, "units": units or "dollars"}).execute()
 		if new.data and new.data[0]:
 			return new.data[0]["id"]
 	except Exception as exc:
@@ -194,8 +196,8 @@ tools = [
 {"type": "function", "function": {"name": "evaluate_poker_hand", "description": "Evaluate a poker hand from hole cards and board cards.", "parameters": {"type": "object", "properties": {"hero_cards": {"type": "array", "items": {"type": "string"}}, "board_cards": {"type": "array", "items": {"type": "string"}}}, "required": ["hero_cards", "board_cards"]}}},
 {"type": "function", "function": {"name": "preflop_advice", "description": "Get preflop strategy for two hole cards.", "parameters": {"type": "object", "properties": {"card1": {"type": "string"}, "card2": {"type": "string"}, "position": {"type": ["string", "null"], "description": "UTG, MP, CO, BTN, SB, BB."}}, "required": ["card1", "card2"]}}},
 {"type": "function", "function": {"name": "log_hand", "description": "Log a poker hand with action and optional result. If the player's message contains MULTIPLE hands (e.g. 'won AKo, then lost 77'), put ALL of them in the hands array at once - one object per hand. OMIT the hand/position only when the player's message gives NO hole cards - the system attaches their most recent hand.", "parameters": {"type": "object", "properties": {"hand": {"type": "string", "description": "The hand, e.g. AKo, 72s, JJ (only the ONE hand if there is only one). Leave OUT only when no hole cards were given."}, "position": {"type": ["string", "null"], "description": "Optional position"}, "action": {"type": ["string", "null"], "description": "What the player did: fold, call, raise, check, all-in"}, "result": {"type": ["string", "null"], "description": "Optional: won or lost"}, "amount": {"type": ["number", "null"], "description": "Optional: amount won or lost"}, "hands": {"type": ["array", "null"], "items": {"type": "object", "properties": {"hand": {"type": "string"}, "position": {"type": ["string", "null"]}, "action": {"type": ["string", "null"]}, "result": {"type": ["string", "null"]}, "amount": {"type": ["number", "null"]}}, "required": ["hand"]}, "description": "Multiple hands at once: one object per hand. Use this whenever the message mentions more than one hand."}}, "required": []}}} ,
-{"type": "function", "function": {"name": "close_session", "description": "Close the player's session with either their total profit or loss, OR their cashout amount. If the player says they were up/down X, pass profit (positive for profit, negative for loss). If they say they cashed out X, pass cashout.", "parameters": {"type": "object", "properties": {"profit": {"type": ["number", "null"], "description": "Total profit (positive) or loss (negative) in dollars"}, "cashout": {"type": ["number", "null"], "description": "Total amount cashed out at the end of the session in dollars"}}, "required": []}}},
-{"type": "function", "function": {"name": "record_buyin", "description": "Record a buy-in or re-buy for the current session.", "parameters": {"type": "object", "properties": {"amount": {"type": "number", "description": "Dollar amount of this buy-in or re-buy"}}, "required": ["amount"]}}},
+{"type": "function", "function": {"name": "close_session", "description": "Close the player's session with either their total profit or loss, OR their cashout amount. If the player says they were up/down X, pass profit (positive for profit, negative for loss). If they say they cashed out X, pass cashout. Report the number exactly as the player stated it in their unit (dollars, bb, or chips) - never convert units.", "parameters": {"type": "object", "properties": {"profit": {"type": ["number", "null"], "description": "Total profit (positive) or loss (negative) in the player's unit"}, "cashout": {"type": ["number", "null"], "description": "Total amount cashed out at the end of the session in the player's unit"}}, "required": []}}},
+{"type": "function", "function": {"name": "record_buyin", "description": "Record a buy-in or re-buy for the current session.", "parameters": {"type": "object", "properties": {"amount": {"type": "number", "description": "Amount of this buy-in or re-buy in the player's unit - report the number exactly as they stated it, never convert"}}, "required": ["amount"]}}},
 ]
 
 available = {"evaluate_poker_hand": evaluate_poker_hand, "preflop_advice": preflop_advice, "log_hand": log_hand, "close_session": close_session, "record_buyin": record_buyin}
@@ -260,6 +262,8 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
         session = get_session_context(user_id)
     system_msg = build_system(mode, session)
     messages = [{"role": "system", "content": system_msg["content"]}, {"role": "user", "content": user_input}]
+    if units and units in ("bb", "chips"):
+        messages[0]["content"] += f" The player is tracking this session in {units}. Report amounts exactly as stated, in {units}, without converting."
     try:
         response = groq_ask(messages, tools=tools, tool_choice="auto")
     except Exception as e:
@@ -303,7 +307,7 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
                     logged_hands.append(parsed)
             if tc.function.name == "record_buyin" and mode == "track":
                 try:
-                    sid = get_or_create_session(user_id)
+                    sid = get_or_create_session(user_id, units)
                     if sid and args.get("amount") is not None:
                         supabase.table("buyins").insert({"session_id": sid, "user_id": user_id, "amount": args["amount"]}).execute()
                 except Exception as exc:
@@ -313,7 +317,7 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
         if mode == "track":
             if closed and user_id:
                 try:
-                    sid = get_or_create_session(user_id)
+                    sid = get_or_create_session(user_id, units)
                     if sid:
                         profit = parsed.get("profit")
                         cashout = parsed.get("cashout")
@@ -332,7 +336,8 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
                                 supabase.table("sessions").update(row).eq("id", sid).execute()
                             else:
                                 discord_ping(f"close_session update: {exc}")
-                        credit_bankroll(user_id, parsed.get("profit"))
+                        if (units or "dollars") == "dollars":
+                            credit_bankroll(user_id, parsed.get("profit"))
                 except Exception as exc:
                     discord_ping(f"close_session: {exc}")
             reply = format_track(parsed, session, closed, logged_hands, units)
@@ -429,6 +434,7 @@ async def chat_endpoint(req: Request):
         return {"reply": "Could not read your message."}
     user_input = body.get("message", "")
     mode = body.get("mode", "coach")
+    units = body.get("units", "dollars")
     auth_header = req.headers.get("authorization", "")
     user_id = None
     user_email = None
@@ -454,7 +460,7 @@ async def chat_endpoint(req: Request):
         batch = logged_hands if logged_hands else [parsed]
         if any(b.get("hand") or b.get("result") or b.get("amount") for b in batch):
             try:
-                session_id = get_or_create_session(user_id) if mode == "track" else None
+                session_id = get_or_create_session(user_id, units) if mode == "track" else None
                 prev_hand = session.get("hand") if session else None
                 single = len(batch) == 1
                 for bh in batch:
@@ -638,7 +644,7 @@ async def session_start(req: Request):
     except (TypeError, ValueError):
         return {"error": "Enter a valid buy-in amount."}
     try:
-        sid = get_or_create_session(uid)
+        sid = get_or_create_session(uid, body.get("units", "dollars"))
         if not sid:
             return {"error": "Could not start a session right now."}
         if amount > 0:
@@ -817,10 +823,13 @@ async def discord_share(req: Request):
         body = {}
     tz_off = int(body.get("tz") or 0)
     try:
-        sres = supabase.table("sessions").select("id, profit, cashout, created_at, label").eq("user_id", uid).eq("status", "closed").order("closed_at", desc=True).limit(1).execute()
+        sres = supabase.table("sessions").select("id, profit, cashout, created_at, label, units").eq("user_id", uid).eq("status", "closed").order("closed_at", desc=True).limit(1).execute()
         sess = sres.data[0] if (sres.data and sres.data[0]) else None
         if not sess:
             return {"error": "No completed session to share."}
+        u = sess.get("units") or "dollars"
+        unit_sym = "$" if u == "dollars" else ""
+        unit_sfx = "" if u == "dollars" else ("bb" if u == "bb" else " chips")
         hands_res = supabase.table("messages").select("hand, result, player_action").eq("session_id", sess["id"]).execute()
         hands = [h for h in (hands_res.data or []) if h.get("hand")]
         hand_count = len(hands)
@@ -846,7 +855,7 @@ async def discord_share(req: Request):
         if date_str:
             header += f" · {date_str}"
         lines.append(header)
-        lines.append(f"Profit: **${pstr}** over **{hand_count} {'hand' if hand_count == 1 else 'hands'}**")
+        lines.append(f"Profit: **{unit_sym}{pstr}{unit_sfx}** over **{hand_count} {'hand' if hand_count == 1 else 'hands'}**")
         stats = []
         if play_count > 0:
             stats.append(f"Win rate: **{won_count}/{play_count} ({won_count/play_count*100:.0f}%)**")
@@ -855,7 +864,7 @@ async def discord_share(req: Request):
         if stats:
             lines.append(" · ".join(stats))
         if buyin_total:
-            lines.append(f"Bought in: **${buyin_total:.2f}**")
+            lines.append(f"Bought in: **{unit_sym}{buyin_total:.2f}{unit_sfx}**")
         lines.append("· AI Holdem Coach")
         lres = supabase.table("discord_links").select("discord_id").eq("user_id", uid).execute()
         if lres.data and lres.data[0] and lres.data[0].get("discord_id"):
@@ -996,13 +1005,18 @@ def usernames_for(user_ids):
         return {}
 
 def session_stats(user_id):
+    rows = []
     try:
-        res = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
+        res = supabase.table("sessions").select("id, profit, cashout, units, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
         rows = list(res.data or [])
-        profits = [s.get("profit") for s in rows if s.get("profit") is not None]
-    except:
-        rows = []
-        profits = []
+    except Exception:
+        try:
+            res = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
+            rows = list(res.data or [])
+        except Exception:
+            pass
+    dollar_rows = [r for r in rows if (r.get("units") or "dollars") == "dollars"]
+    profits = [s.get("profit") for s in dollar_rows if s.get("profit") is not None]
     nights = len(profits)
     total = sum(profits)
     wins = sum(1 for p in profits if p > 0)
@@ -1014,16 +1028,16 @@ def session_stats(user_id):
             break
     total_buyins = 0.0
     cashouts = []
-    if rows:
-        session_ids = {row["id"] for row in rows}
+    if dollar_rows:
+        session_ids = {row["id"] for row in dollar_rows}
         try:
-            bres = supabase.table("buyins").select("amount, session_id").in_("session_id", [r["id"] for r in rows]).execute()
+            bres = supabase.table("buyins").select("amount, session_id").in_("session_id", [r["id"] for r in dollar_rows]).execute()
             for r in (bres.data or []):
                 if r.get("session_id") in session_ids:
                     total_buyins += r.get("amount") or 0
         except:
             pass
-        cashouts = [s.get("cashout") for s in rows if s.get("cashout") is not None]
+        cashouts = [s.get("cashout") for s in dollar_rows if s.get("cashout") is not None]
     roi = round(total / total_buyins * 100, 1) if total_buyins else None
     return {
         "nights": nights,
