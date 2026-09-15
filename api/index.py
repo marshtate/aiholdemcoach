@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.error
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from groq import Groq
 from treys import Card, Evaluator
 from supabase import create_client, Client
@@ -1653,9 +1654,9 @@ async def stripe_webhook(req: Request):
     raw = await req.body()
     sig = req.headers.get("stripe-signature", "")
     if not STRIPE_WEBHOOK_SECRET:
-        return {"error": "webhook not configured"}
+        return JSONResponse(status_code=503, content={"error": "webhook not configured"})
     if not verify_stripe_signature(raw, sig):
-        return {"error": "bad signature"}, 400
+        return JSONResponse(status_code=400, content={"error": "bad signature"})
     try:
         event = json.loads(raw)
         typ = event.get("type")
@@ -1707,7 +1708,7 @@ async def stripe_webhook(req: Request):
                 upsert_subscription(uid, "free", "canceled", None, sub_id, obj.get("customer"))
     except Exception as exc:
         discord_ping(f"stripe webhook: {exc}")
-        return {"error": str(exc)}, 500
+        return JSONResponse(status_code=500, content={"error": str(exc)})
     return {"ok": True}
 
 @app.post("/api/admin/set-tier")
