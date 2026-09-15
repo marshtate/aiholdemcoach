@@ -260,6 +260,22 @@ const closed = sessions.find(s => s.status === 'closed');
 if (!closed) { recapSessionId = null; return; }
 recapSessionId = closed.id;
 renderQuickChips();
+appendRecapPrompt();
+}
+function appendRecapPrompt() {
+const chatbox = document.getElementById('chatbox');
+const old = document.getElementById('recap-prompt');
+if (old) old.remove();
+if (!chatbox || !recapSessionId) return;
+const w = document.createElement('div');
+w.id = 'recap-prompt';
+w.className = 'flex flex-col items-start';
+w.innerHTML = `<div class="bg-purple-900/40 border border-purple-800 text-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm space-y-2">
+<p>Night's over. Want a coaching review of how you played?</p>
+<button onclick="startRecap()" class="bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">Recap with coach</button>
+</div>`;
+chatbox.appendChild(w);
+chatbox.scrollTop = chatbox.scrollHeight;
 }
 async function startRecap() {
 if (!recapSessionId || recapActive) return;
