@@ -330,16 +330,17 @@ if (sessionStarting) return;
 const data = await authedFetch('/api/sessions');
 const hasOpen = data && (data.sessions || []).some(s => s.status === 'open');
 if (hasOpen) { refreshSessionBanner(); return; }
-const amtStr = prompt('Buy-in amount ($) - or leave blank to start without one:', currentDefaultBuyin || '5');
+const unitWord = currentUnits === 'bb' ? 'bb' : currentUnits === 'chips' ? 'chips' : '$';
+const amtStr = prompt('Buy-in amount (' + unitWord + ') - or leave blank to start without one:', currentDefaultBuyin || '5');
 if (amtStr === null) return;
 let amount = 0;
 if (amtStr.trim() !== '') {
 amount = parseFloat(amtStr);
-if (isNaN(amount) || amount < 0) { alert('Enter a valid buy-in amount ($).'); return; }
+if (isNaN(amount) || amount < 0) { alert('Enter a valid buy-in amount (' + (currentUnits === 'bb' ? 'bb' : currentUnits === 'chips' ? 'chips' : '$') + ').'); return; }
 }
 sessionStarting = true;
 try {
-const res = await authedFetch('/api/session/start', { method: 'POST', body: JSON.stringify({ amount: amount }) });
+const res = await authedFetch('/api/session/start', { method: 'POST', body: JSON.stringify({ amount: amount, units: currentUnits }) });
 if (res && res.error) { alert(res.error); return; }
 checkSession();
 refreshSessionBanner();
