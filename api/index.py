@@ -175,6 +175,10 @@ def get_or_create_session(user_id, units="dollars"):
 			row = result.data[0]
 			if (row.get("units") or "dollars") == (units or "dollars"):
 				return row["id"]
+			try:
+				supabase.table("sessions").update({"status": "closed"}).eq("id", row["id"]).execute()
+			except Exception as exc:
+				discord_ping(f"close orphan session: {exc}")
 		new = supabase.table("sessions").insert({"user_id": user_id, "units": units or "dollars"}).execute()
 		if new.data and new.data[0]:
 			return new.data[0]["id"]
@@ -212,7 +216,7 @@ def get_session_context(user_id):
     return None
 coach_system = "You are a poker coach. When a player describes their hand WITH a board, use evaluate_poker_hand. When they describe ONLY hole cards, use preflop_advice. Respond in 2-3 short sentences. Talk like a friend texting from the table."
 
-track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. Never drop a result or amount the player mentions. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If the player's message names NO hole cards at all (e.g. just 'lost 35', 'won the pot', 'flop came 8 7 2'), leave the hand field OUT of log_hand - the system attaches their most recent hand itself. Only respond 'What hand were you holding?' when the player gives no cards and there is no previous hand to attach."
+track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. Never drop a result or amount the player mentions. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If the player's message names NO hole cards at all (e.g. just 'lost 35', 'won the pot', 'flop came 8 7 2'), leave the hand field OUT of log_hand - the system attaches their most recent hand itself. Only respond 'What hand were you holding?' when the player gives no cards and there is no previous hand to attach. If they say they're done AND give a profit or cash-out figure now, call close_session immediately with those figures - never reply with conversation or advice instead of closing, and if the buy-in was already recorded earlier in this conversation, use it - do not ask them to confirm buy-in again."
 
 def build_system(mode, session=None):
 	base = track_system if mode == "track" else coach_system
@@ -521,7 +525,7 @@ async def sessions_endpoint(req: Request):
     except:
         return {"error": "unauthorized"}
     try:
-        result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status").eq("user_id", user_id).order("created_at", desc=True).execute()
+        result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, units").eq("user_id", user_id).order("created_at", desc=True).execute()
         sessions = result.data or []
     except Exception as exc:
         discord_ping(f"get sessions: {exc}")
@@ -726,7 +730,7 @@ async def session_detail(req: Request):
     if not sid:
         return {"error": "missing id"}
     try:
-        sres = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, label").eq("id", sid).eq("user_id", uid).execute()
+        sres = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, label, units").eq("id", sid).eq("user_id", uid).execute()
         sess = sres.data[0] if (sres.data and sres.data[0]) else None
         if not sess:
             return {"error": "not found"}
@@ -753,10 +757,17 @@ async def session_delete(req: Request):
     if not sid:
         return {"error": "missing id"}
     try:
+        try:
+            srow = supabase.table("sessions").select("status, profit, units").eq("id", sid).eq("user_id", uid).execute()
+            sess = srow.data[0] if (srow.data and srow.data[0]) else None
+        except:
+            sess = None
         supabase.table("buyins").delete().eq("session_id", sid).eq("user_id", uid).execute()
         supabase.table("recap_messages").delete().eq("session_id", sid).eq("user_id", uid).execute()
         supabase.table("messages").delete().eq("session_id", sid).eq("user_id", uid).execute()
         supabase.table("sessions").delete().eq("id", sid).eq("user_id", uid).execute()
+        if sess and sess.get("status") == "closed" and (sess.get("units") or "dollars") == "dollars" and sess.get("profit"):
+            revert_bankroll(uid, float(sess["profit"]))
         return {"ok": True}
     except Exception as exc:
         discord_ping(f"session delete: {exc}")
@@ -977,6 +988,17 @@ def credit_bankroll(user_id, profit):
         supabase.table("bankrolls").update({"amount": round(current + float(profit), 2)}).eq("user_id", user_id).execute()
     except Exception as exc:
         discord_ping(f"credit_bankroll: {exc}")
+
+def revert_bankroll(user_id, profit):
+    if profit is None:
+        return
+    try:
+        ensure_bankroll(user_id)
+        res = supabase.table("bankrolls").select("amount").eq("user_id", user_id).execute()
+        current = float((res.data[0] or {}).get("amount") or 0) if (res.data or []) else 0
+        supabase.table("bankrolls").update({"amount": round(current - float(profit), 2)}).eq("user_id", user_id).execute()
+    except Exception as exc:
+        discord_ping(f"revert_bankroll: {exc}")
 
 @app.get("/api/bankroll")
 async def bankroll_get(req: Request):
