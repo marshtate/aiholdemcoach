@@ -826,7 +826,7 @@ return `<button onclick="openSession(${s.id}, 'stats-view')" class="w-full flex 
 }).join('')}
 </div>`;
 if (closed.length >= 2) {
-const chartSessions = closed.slice(-10);
+const chartSessions = closed.slice(0, 10).reverse();
 const maxAbs = Math.max(1, ...chartSessions.map(s => Math.abs(s.profit || 0)));
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
 <h3 class="text-sm font-semibold text-gray-300">Profit trend</h3>
