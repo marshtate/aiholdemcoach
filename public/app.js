@@ -65,6 +65,10 @@ const meta = document.querySelector('meta[name="theme-color"]');
 if (meta) meta.setAttribute('content', currentTheme === 'light' ? '#f4f4f5' : '#000000');
 }
 function setTheme(t) { currentTheme = t; applyTheme(); refreshSettingsUI(); }
+const sessionUnit = (s) => (s && s.units) || 'dollars';
+const fmtAmt = (v, unit) => { const u = unit || 'dollars'; const n = Number(v) || 0; return u === 'dollars' ? '$' + n.toFixed(2) : n.toFixed(2) + ' ' + u; };
+const fmtSigned = (v, unit) => { const u = unit || 'dollars'; const n = Number(v) || 0; return u === 'dollars' ? (n >= 0 ? '+$' : '-$') + Math.abs(n).toFixed(2) : (n >= 0 ? '+' : '') + n.toFixed(2) + ' ' + u; };
+const dollarSession = (s) => sessionUnit(s) === 'dollars';
 function unitAmount(v) {
 if (v === null || v === undefined) return '';
 if (currentUnits === 'bb') return v.toFixed(2) + 'bb';
@@ -471,10 +475,11 @@ return;
 
 const open = sessions.find(s => s.status === 'open');
 const closed = sessions.filter(s => s.status === 'closed' && s.profit!== null);
+const moneyClosed = closed.filter(dollarSession);
 let folds = 0;
 entries.forEach(e => { if (e.player_action && e.player_action.toLowerCase() === 'fold') folds++; });
 const foldPct = entries.length > 0? Math.round((folds / entries.length) * 100): 0;
-const totalProfit = closed.reduce((sum, s) => sum + (s.profit || 0), 0);
+const totalProfit = moneyClosed.reduce((sum, s) => sum + (s.profit || 0), 0);
 const profitStr = totalProfit >= 0? '+$' + totalProfit.toFixed(2): '-$' + Math.abs(totalProfit).toFixed(2);
 const wins = closed.filter(s => s.profit > 0).length;
 const winRate = closed.length > 0? Math.round((wins / closed.length) * 100): null;
@@ -490,7 +495,7 @@ html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 
 <div class="flex items-center gap-2">
 <div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div>
 <span class="text-xs font-semibold text-emerald-400">Session open</span>
-${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${bin.toFixed(2)} in</span>` : ''}
+${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${fmtAmt(bin, open.units)} in</span>` : ''}
 </div>
 <p class="text-xs text-gray-500">Log hands. Say "done" when you're ready and confirm your buy-in and cash-out to close.</p>
 </div>`;
@@ -545,7 +550,7 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <p class="text-xs text-gray-500">Win rate</p>
 </div>
 <div class="bg-black rounded-lg p-3 text-center">
-<p class="text-xl font-bold ${totalProfit >= 0? 'text-emerald-400': 'text-red-400'}">${closed.length > 0? (totalProfit >= 0? '+': '') + '$' + (totalProfit / closed.length).toFixed(2): '-'}</p>
+<p class="text-xl font-bold ${totalProfit >= 0? 'text-emerald-400': 'text-red-400'}">${moneyClosed.length > 0? (totalProfit >= 0? '+': '') + '$' + (totalProfit / moneyClosed.length).toFixed(2): '-'}</p>
 <p class="text-xs text-gray-500">Avg per night</p>
 </div>
 </div>
@@ -560,7 +565,7 @@ const p = s.profit || 0;
 const label = s.label ? s.label + ' · ' : '';
 return `<button onclick="openSession(${s.id}, 'home-view')" class="w-full flex justify-between items-center text-xs text-left hover:bg-black/40 rounded-lg px-2 py-1 -mx-2 transition">
 <span class="text-gray-400">${label}${d}</span>
-<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span>
+<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${fmtSigned(p, s.units)}</span>
 </button>`;
 }).join('')}
 </div>`;
@@ -709,15 +714,16 @@ if (e.player_action) { const a = e.player_action.toLowerCase(); actions[a] = (ac
 
 const foldPct = entries.length > 0? Math.round((folds / entries.length) * 100): 0;
 const closed = sessions.filter(s => s.status === 'closed' && s.profit!== null);
+const moneyClosed = closed.filter(dollarSession);
 const open = sessions.find(s => s.status === 'open');
-const totalProfit = closed.reduce((sum, s) => sum + (s.profit || 0), 0);
+const totalProfit = moneyClosed.reduce((sum, s) => sum + (s.profit || 0), 0);
 const wins = closed.filter(s => s.profit > 0).length;
 const winRate = closed.length > 0? Math.round((wins / closed.length) * 100): null;
 const profitStr = totalProfit >= 0? '+$' + totalProfit.toFixed(2): '-$' + Math.abs(totalProfit).toFixed(2);
 const avgProfit = closed.length > 0? (totalProfit / closed.length): 0;
 const avgStr = avgProfit >= 0? '+$' + avgProfit.toFixed(2): '-$' + Math.abs(avgProfit).toFixed(2);
-const totalBuyins = closed.reduce((sum, s) => sum + (s.buyins || 0), 0);
-const totalCashouts = closed.reduce((sum, s) => sum + (s.cashout || 0), 0);
+const totalBuyins = moneyClosed.reduce((sum, s) => sum + (s.buyins || 0), 0);
+const totalCashouts = moneyClosed.reduce((sum, s) => sum + (s.cashout || 0), 0);
 const roi = totalBuyins > 0 ? (totalProfit / totalBuyins) * 100 : null;
 const roiStr = roi === null ? '-' : (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%';
 
@@ -728,7 +734,7 @@ html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 
 <div class="flex items-center gap-2">
 <div class="w-2 h-2 bg-emerald-500 rounded-full pulse-green"></div>
 <span class="text-xs font-semibold text-emerald-400">Session open</span>
-${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${bin.toFixed(2)} in</span>` : ''}
+${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${fmtAmt(bin, open.units)} in</span>` : ''}
 </div>
 <p class="text-xs text-gray-500">Log hands. Say "done" when you're ready and confirm your buy-in and cash-out to close.</p>
 </div>`;
@@ -753,7 +759,7 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalBuyins.toFixed(2)}</p><p class="text-xs text-gray-500">Total buy-ins</p></div>
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalCashouts.toFixed(2)}</p><p class="text-xs text-gray-500">Total cashouts</p></div>
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${roi >= 0? 'text-emerald-400': 'text-red-400'}">${roiStr}</p><p class="text-xs text-gray-500">ROI</p></div>
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${(totalBuyins / closed.length).toFixed(2)}</p><p class="text-xs text-gray-500">Avg buy-in</p></div>
+<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${(totalBuyins / moneyClosed.length).toFixed(2)}</p><p class="text-xs text-gray-500">Avg buy-in</p></div>
 </div>` : ''}
 </div>`;
 const recent = closed.slice(0, 5).reverse();
@@ -763,10 +769,10 @@ ${recent.map(s => {
 const d = new Date(s.closed_at || s.created_at).toLocaleDateString();
 const p = s.profit || 0;
 const label = s.label ? s.label + ' · ' : '';
-const nit = s.buyins ? `<span class="text-gray-500">$${(s.buyins)} in</span> ` : '';
+const nit = s.buyins ? `<span class="text-gray-500">${fmtAmt(s.buyins, s.units)} in</span> ` : '';
 return `<button onclick="openSession(${s.id}, 'stats-view')" class="w-full flex justify-between items-center text-xs text-left hover:bg-black/40 rounded-lg px-2 py-1 -mx-2 transition">
 <span class="text-gray-400">${label}${d}</span>
-<div class="flex items-center gap-2">${nit}<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${p >= 0? '+': ''}$${p.toFixed(2)}</span></div>
+<div class="flex items-center gap-2">${nit}<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${fmtSigned(p, s.units)}</span></div>
 </button>`;
 }).join('')}
 </div>`;
@@ -1042,7 +1048,7 @@ const s = data.session;
 const d = new Date(s.closed_at || s.created_at);
 const dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 const p = s.profit || 0;
-const pStr = p >= 0 ? '+$' + p.toFixed(2) : '-$' + Math.abs(p).toFixed(2);
+const pStr = fmtSigned(p, s.units);
 let html = `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <button onclick="relaunchTab('${targetId}')" class="text-xs text-gray-400 hover:text-emerald-400">&larr; Back</button>
 <div class="flex items-center justify-between pt-1">
@@ -1051,7 +1057,7 @@ let html = `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 </div>
 <div class="grid grid-cols-3 gap-2 mt-2">
 <div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${pStr}</p><p class="text-[10px] text-gray-500">Profit</p></div>
-<div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold text-gray-300">$${(s.buyins_total || 0).toFixed(2)}</p><p class="text-[10px] text-gray-500">Buy-ins</p></div>
+<div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold text-gray-300">${fmtAmt(s.buyins_total || 0, s.units)}</p><p class="text-[10px] text-gray-500">Buy-ins</p></div>
 <div class="bg-black rounded-lg p-2 text-center"><p class="text-sm font-bold text-gray-300">${s.hands.length}</p><p class="text-[10px] text-gray-500">Hands</p></div>
 </div>
 <div class="flex gap-3 pt-1">
@@ -1063,7 +1069,7 @@ let html = `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 if (s.buyin_list && s.buyin_list.length > 0) {
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <h3 class="text-sm font-semibold text-gray-300">Buy-ins</h3>
-${s.buyin_list.map(b => `<div class="flex justify-between text-xs"><span class="text-gray-400">${new Date(b.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span><span class="text-gray-300">$${b.amount.toFixed(2)}</span></div>`).join('')}
+${s.buyin_list.map(b => `<div class="flex justify-between text-xs"><span class="text-gray-400">${new Date(b.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span><span class="text-gray-300">${fmtAmt(b.amount, s.units)}</span></div>`).join('')}
 </div>`;
 }
 if (s.hands.length > 0) {
