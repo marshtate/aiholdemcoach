@@ -295,12 +295,14 @@ banner.innerHTML = `<div class="bg-emerald-900/30 border border-emerald-800 roun
 } else {
 banner.innerHTML = `<div class="bg-neutral-900/60 border border-neutral-800 rounded-xl px-3 py-2 flex items-center gap-2">
 <span class="text-xs text-gray-500">No open session.</span>
-<button onclick="startSession()" class="ml-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">Start session</button>
+<button onclick="startSession()" id="start-session-btn" class="ml-auto bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">Start session</button>
 </div>`;
 }
 banner.classList.remove('hidden');
 }
+let sessionStarting = false;
 async function startSession() {
+if (sessionStarting) return;
 const data = await authedFetch('/api/sessions');
 const hasOpen = data && (data.sessions || []).some(s => s.status === 'open');
 if (hasOpen) { refreshSessionBanner(); return; }
@@ -311,10 +313,13 @@ if (amtStr.trim() !== '') {
 amount = parseFloat(amtStr);
 if (isNaN(amount) || amount < 0) { alert('Enter a valid buy-in amount ($).'); return; }
 }
+sessionStarting = true;
+try {
 const res = await authedFetch('/api/session/start', { method: 'POST', body: JSON.stringify({ amount: amount }) });
 if (res && res.error) { alert(res.error); return; }
 checkSession();
 refreshSessionBanner();
+} finally { sessionStarting = false; }
 }
 
 const tabHome = document.getElementById('tab-home');
