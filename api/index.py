@@ -2,6 +2,7 @@ import os
 import json
 import re
 import time
+from datetime import datetime, timezone, timedelta
 import threading
 import urllib.request
 import urllib.parse
@@ -702,7 +703,12 @@ async def discord_share(req: Request):
     if not webhook:
         return {"error": "Share webhook not configured."}
     try:
-        sres = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", uid).eq("status", "closed").order("closed_at", desc=True).limit(1).execute()
+        body = await req.json()
+    except:
+        body = {}
+    tz_off = int(body.get("tz") or 0)
+    try:
+        sres = supabase.table("sessions").select("id, profit, cashout, created_at, label").eq("user_id", uid).eq("status", "closed").order("closed_at", desc=True).limit(1).execute()
         sess = sres.data[0] if (sres.data and sres.data[0]) else None
         if not sess:
             return {"error": "No completed session to share."}
@@ -713,13 +719,28 @@ async def discord_share(req: Request):
         pstr = f"{'+' if p >= 0 else ''}{p:.2f}" if p is not None else "0.00"
         c = supabase.table("profiles").select("username").eq("user_id", uid).execute()
         username = (c.data[0] or {}).get("username", "Player") if c.data else "Player"
-        msg = f"**{username}** tonight: **${pstr}** over **{hand_count} hands**"
+        created = sess.get("created_at", "")
+        try:
+            local_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00")).astimezone(timezone(timedelta(minutes=-tz_off)))
+            date_str = local_dt.strftime("%a, %b %-d")
+        except Exception:
+            date_str = ""
+        lines = []
+        label = sess.get("label")
+        if label:
+            lines.append(f"**{label}**")
+        header = username
+        if date_str:
+            header += f" · {date_str}"
+        lines.append(header)
+        lines.append(f"Profit: **${pstr}** over **{hand_count} hands**")
         if buyin_total:
-            msg += f", **${buyin_total:.2f}** bought in"
-        msg += " · AI Holdem Coach"
+            lines.append(f"Bought in: **${buyin_total:.2f}**")
+        lines.append("· AI Holdem Coach")
         lres = supabase.table("discord_links").select("discord_id").eq("user_id", uid).execute()
         if lres.data and lres.data[0] and lres.data[0].get("discord_id"):
-            msg += f" <@{lres.data[0]['discord_id']}>"
+            lines[-1] += f" <@{lres.data[0]['discord_id']}>"
+        msg = "\n".join(lines)
         payload = urllib.request.Request(webhook, data=json.dumps({"content": msg}).encode(), headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
         try:
             urllib.request.urlopen(payload, timeout=10)
