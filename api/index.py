@@ -144,14 +144,18 @@ def entitlement(user_id, user_email=None):
 				sub = r.data[0]
 		except Exception:
 			sub = None
-	if sub and sub.get("tier") in ("pro", "premium", "legacy") and sub.get("status") in ("active", "trial", "legacy"):
-		expired = False
-		if sub.get("current_period_end"):
-			pe = _parse_ts(sub["current_period_end"])
-			if pe is not None and pe < datetime.now(timezone.utc) - timedelta(days=1):
-				expired = True
-		if not expired:
-			return {"tier": sub["tier"], "plan": sub["tier"], "limits": tier_limits(sub["tier"]), "subscription": sub}
+	if sub:
+		status = sub.get("status")
+		stripe_tier = sub.get("tier")
+		if stripe_tier in ("pro", "premium", "legacy") and status in ("active", "trial", "legacy"):
+			expired = False
+			if sub.get("current_period_end"):
+				pe = _parse_ts(sub["current_period_end"])
+				if pe is not None and pe < datetime.now(timezone.utc) - timedelta(days=1):
+					expired = True
+			if not expired:
+				return {"tier": stripe_tier, "plan": stripe_tier, "limits": tier_limits(stripe_tier), "subscription": sub}
+		return {"tier": "free", "plan": "free", "limits": tier_limits("free"), "subscription": sub}
 	created_at = None
 	if user_id:
 		try:
