@@ -584,6 +584,64 @@ def auth_user_id(req):
         pass
     return None
 
+@app.get("/api/export")
+async def export_endpoint(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        profile = supabase.table("profiles").select("username, created_at").eq("user_id", uid).execute()
+        sessions = supabase.table("sessions").select("*").eq("user_id", uid).order("created_at", desc=False).execute()
+        sess_ids = [s["id"] for s in (sessions.data or [])]
+        buyins = []
+        if sess_ids:
+            bres = supabase.table("buyins").select("session_id, amount, created_at").in_("session_id", sess_ids).order("created_at", desc=False).execute()
+            buyins = bres.data or []
+        hands = supabase.table("messages").select("hand, position, player_action, result, amount, input, reply, tier, created_at").eq("user_id", uid).order("created_at", desc=False).execute()
+        bankroll = supabase.table("bankrolls").select("amount, goal, updated_at").eq("user_id", uid).execute()
+        discord = supabase.table("discord_links").select("discord_username, linked_at").eq("user_id", uid).execute()
+        stats = session_stats(uid)
+    except Exception as exc:
+        discord_ping(f"export: {exc}")
+        return {"error": "Could not export data right now."}
+    return {
+        "ok": True,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "username": (profile.data[0] or {}).get("username") if profile.data else None,
+        "joined_at": (profile.data[0] or {}).get("created_at") if profile.data else None,
+        "stats": stats,
+        "bankroll": (bankroll.data[0] or {}) if bankroll.data else None,
+        "discord_link": (discord.data[0] or {}) if discord.data else None,
+        "sessions": sessions.data or [],
+        "buyins": buyins,
+        "hands": hands.data or [],
+    }
+
+@app.post("/api/account/delete")
+async def account_delete(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        body = {}
+    if (body.get("confirm") or "").strip().lower() != "delete":
+        return {"error": "Type DELETE to confirm you want your account removed."}
+    try:
+        for tbl in ("buyins", "recap_messages", "messages", "sessions", "friends", "discord_links", "bankrolls", "chat_usage", "profiles"):
+            supabase.table(tbl).delete().eq("user_id", uid).execute()
+        supabase.table("friends").delete().eq("friend_id", uid).execute()
+        supabase.auth.admin.delete_user(uid)
+    except Exception as exc:
+        discord_ping(f"account delete: {exc}")
+        return {"error": "Could not delete your account right now. Try again in a minute."}
+    try:
+        discord_ping(f"Account deleted: {uid[:8]}")
+    except Exception:
+        pass
+    return {"ok": True}
+
 @app.post("/api/history/update")
 async def history_update(req: Request):
     uid = auth_user_id(req)
