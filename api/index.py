@@ -1086,3 +1086,23 @@ async def resolve_login_endpoint(req: Request):
     if not email:
         return {"error": "user not found"}
     return {"email": email}
+
+@app.get("/api/debug-discord")
+async def debug_discord():
+    """TEMP: pings both Discord webhooks to check if they're alive."""
+    import time as _time
+    share = os.environ.get("DISCORD_SHARE_WEBHOOK_URL", "")
+    update = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    results = {"share_len": len(share), "update_len": len(update), "share_prefix": share[:20] if share else "MISSING"}
+    for label, url in [("share", share), ("update", update)]:
+        if not url:
+            results[f"{label}_ping"] = "no url"
+            continue
+        try:
+            req = urllib.request.Request(url, data=json.dumps({"content": f"ping {_time.time():.0f}"}).encode(),
+                                        headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10)
+            results[f"{label}_ping"] = "ok"
+        except Exception as e:
+            results[f"{label}_ping"] = str(e)[:120]
+    return results
