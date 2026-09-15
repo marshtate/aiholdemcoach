@@ -659,6 +659,26 @@ async def session_rename(req: Request):
 
 DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
+DISCORD_GUILD_ID = os.environ.get("DISCORD_GUILD_ID") or "1549096373977354271"
+DISCORD_FALLBACK_INVITE = "https://discord.gg/KB4rNwnea"
+_widget_cache = {"at": 0.0, "data": None}
+
+@app.get("/api/discord/widget")
+async def discord_widget(req: Request):
+    if time.time() - _widget_cache["at"] < 60 and _widget_cache["data"] is not None:
+        return _widget_cache["data"]
+    try:
+        wh = urllib.request.Request(f"https://discord.com/api/guilds/{DISCORD_GUILD_ID}/widget.json",
+                                   headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(wh, timeout=10) as r:
+            data = json.loads(r.read().decode())
+        result = {"ok": True, "name": data.get("name") or "", "presence_count": data.get("presence_count") or 0,
+                  "invite": data.get("instant_invite") or DISCORD_FALLBACK_INVITE}
+    except Exception:
+        result = {"ok": False, "invite": DISCORD_FALLBACK_INVITE}
+    _widget_cache["at"] = time.time()
+    _widget_cache["data"] = result
+    return result
 
 @app.get("/api/discord/config")
 async def discord_config(req: Request):
