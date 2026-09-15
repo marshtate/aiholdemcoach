@@ -912,7 +912,7 @@ const redirect = encodeURIComponent(window.location.origin + '/');
 window.location.href = 'https://discord.com/api/oauth2/authorize?client_id=' + config.client_id + '&response_type=code&redirect_uri=' + redirect + '&scope=identify&state=' + state;
 }
 async function shareTonight() {
-const data = await authedFetch('/api/discord/share', { method: 'POST', body: '{}' });
+const data = await authedFetch('/api/discord/share', { method: 'POST', body: JSON.stringify({ tz: new Date().getTimezoneOffset() }) });
 if (data && data.error) { alert(data.error); return; }
 const s = document.getElementById('discord-status');
 if (s) s.innerHTML = '<p class="text-emerald-400">Posted! Check your Discord channel.</p>';
