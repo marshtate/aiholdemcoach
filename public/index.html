@@ -283,6 +283,55 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 <p class="text-[10px] text-gray-600">Settings save automatically on this device.</p>
 <div class="pt-3 border-t border-neutral-800 space-y-2">
+<p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Past sessions</p>
+<p class="text-[10px] text-gray-500">Add old games so they count in your stats.</p>
+<button onclick="toggleImportForm()" id="import-toggle" class="w-full bg-neutral-700 hover:bg-neutral-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Add past session</button>
+<div id="import-form" class="hidden space-y-3 pt-2">
+<div>
+<p class="text-xs text-gray-400 mb-1">Date</p>
+<input id="import-date" type="date" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500">
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Label (optional)</p>
+<input id="import-label" type="text" placeholder="e.g. Friday 1/2 at Casino" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600">
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Buy-in total</p>
+<input id="import-buyin" type="number" inputmode="decimal" min="0" step="1" placeholder="0" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600">
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Result</p>
+<select id="import-as" onchange="toggleImportResult()" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none">
+<option value="cashout">I cashed out</option>
+<option value="profit">Net profit / loss</option>
+</select>
+</div>
+<div id="import-cashout-wrap">
+<p class="text-xs text-gray-400 mb-1">Cash-out total</p>
+<input id="import-cashout" type="number" inputmode="decimal" step="1" placeholder="0" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600">
+</div>
+<div id="import-profit-wrap" class="hidden">
+<p class="text-xs text-gray-400 mb-1">Profit or loss (− = loss)</p>
+<input id="import-profit" type="number" inputmode="decimal" step="1" placeholder="e.g. 40 or -15" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600">
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Units</p>
+<select id="import-units" onchange="onImportUnitsChange()" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none">
+<option value="dollars">$ dollars</option>
+<option value="bb">Big blinds</option>
+<option value="chips">Chips</option>
+</select>
+</div>
+<label class="flex items-start gap-2 text-xs text-gray-300">
+<input id="import-bankroll" type="checkbox" class="mt-0.5 accent-emerald-500">
+<span>Apply to bankroll</span>
+</label>
+<p id="import-bankroll-hint" class="hidden text-[10px] text-gray-600">Bankroll only applies to dollar sessions.</p>
+<button onclick="addPastSession()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2.5 rounded-lg transition">Add session</button>
+<p id="import-status" class="text-xs text-gray-400"></p>
+</div>
+</div>
+<div class="pt-3 border-t border-neutral-800 space-y-2">
 <p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Your data</p>
 <div class="flex gap-2">
 <button onclick="exportMyData()" class="flex-1 bg-neutral-700 hover:bg-neutral-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Export data</button>
