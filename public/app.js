@@ -306,7 +306,7 @@ if (sessionStarting) return;
 const data = await authedFetch('/api/sessions');
 const hasOpen = data && (data.sessions || []).some(s => s.status === 'open');
 if (hasOpen) { refreshSessionBanner(); return; }
-const amtStr = prompt('Buy-in amount ($) - or leave blank to start without one:', '100');
+const amtStr = prompt('Buy-in amount ($) - or leave blank to start without one:', '5');
 if (amtStr === null) return;
 let amount = 0;
 if (amtStr.trim() !== '') {
