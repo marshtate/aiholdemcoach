@@ -278,6 +278,14 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <input id="default-buyin" type="number" inputmode="decimal" min="0" step="1" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" onchange="setDefaultBuyin(this.value)">
 </div>
 <p class="text-[10px] text-gray-600">Settings save automatically on this device.</p>
+<div class="pt-3 border-t border-neutral-800 space-y-2">
+<p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Your data</p>
+<div class="flex gap-2">
+<button onclick="exportMyData()" class="flex-1 bg-neutral-700 hover:bg-neutral-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Export data</button>
+<button onclick="deleteMyAccount()" class="flex-1 bg-red-600/80 hover:bg-red-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Delete account</button>
+</div>
+<p class="text-[10px] text-gray-600">Export downloads a copy of your hands, sessions, and stats. Deleting is permanent.</p>
+</div>
 <div class="flex justify-center gap-4 text-xs pt-1">
 <a href="/privacy.html" class="text-gray-500 hover:text-emerald-400 transition">Privacy policy</a>
 <a href="/terms.html" class="text-gray-500 hover:text-emerald-400 transition">Terms of service</a>
