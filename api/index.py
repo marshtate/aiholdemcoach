@@ -4,8 +4,12 @@ import re
 import time
 from datetime import datetime, timezone, timedelta
 import threading
+import base64
+import hashlib
+import hmac
 import urllib.request
 import urllib.parse
+import urllib.error
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -58,12 +62,35 @@ USER_AGENT = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
 CHAT_DAILY_LIMIT = int(os.environ.get("CHAT_DAILY_LIMIT", "300"))
 CHAT_GLOBAL_DAILY_LIMIT = int(os.environ.get("CHAT_GLOBAL_DAILY_LIMIT", "3000"))
 CHAT_WHITELIST = {e.strip().lower() for e in os.environ.get("CHAT_WHITELIST", "").split(",") if e.strip()}
+FREE_COACH_LIMIT = int(os.environ.get("FREE_COACH_LIMIT", "5"))
+FREE_TRACK_LIMIT = int(os.environ.get("FREE_TRACK_LIMIT", "10"))
+FREE_HISTORY_DAYS = int(os.environ.get("FREE_HISTORY_DAYS", "30"))
+TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "7"))
+GRANDFATHER_MONTHS = int(os.environ.get("GRANDFATHER_MONTHS", "6"))
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+APP_URL = os.environ.get("APP_URL", "https://aiholdemcoach.vercel.app")
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRO_PRICE = os.environ.get("STRIPE_PRO_PRICE", "")
+STRIPE_PREMIUM_PRICE = os.environ.get("STRIPE_PREMIUM_PRICE", "")
 USAGE_SENTINEL_GLOBAL = "00000000-0000-0000-0000-000000000000"
 USAGE_SENTINEL_ANON = "ffffffff-ffff-ffff-ffff-ffffffffffff"
 _usage_gate_warned = False
 
-def check_chat_quota(user_email, user_id):
+PLAN_LIMITS = {
+    "free": {"coach": FREE_COACH_LIMIT, "track": FREE_TRACK_LIMIT, "history_days": FREE_HISTORY_DAYS, "recap": False, "import": False},
+    "pro": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
+    "premium": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
+    "legacy": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
+    "admin": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
+}
+
+def check_chat_quota(user_email, user_id, mode="chat", ent=None):
 	global _usage_gate_warned
+	if ent and ent.get("tier") == "admin":
+		if not user_id:
+			pass
+		return None
 	if user_email and user_email.lower() in CHAT_WHITELIST:
 		return None
 	u = user_id or USAGE_SENTINEL_ANON
@@ -72,21 +99,159 @@ def check_chat_quota(user_email, user_id):
 			"p_day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
 			"p_user": u,
 			"p_global": USAGE_SENTINEL_GLOBAL,
+			"p_mode": "chat" if mode not in ("coach", "track") else mode,
 		}).execute()
 	except Exception as exc:
 		if not _usage_gate_warned:
 			_usage_gate_warned = True
-			discord_ping(f"Usage gate not installed yet (run schema.sql chat_usage block): {exc}")
+			discord_ping(f"Usage gate not installed (run schema.sql v3 block): {exc}")
 		return None
 	rows = res.data if isinstance(res.data, list) else ([res.data] if res.data else [])
 	row = rows[0] if rows else {}
-	u_count = row.get("u_count") or 0
-	g_count = row.get("g_count") or 0
+	g_count = row.get("g_chats") or row.get("g_count") or 0
 	if g_count > CHAT_GLOBAL_DAILY_LIMIT:
 		return "Coach is at capacity for today. Try again tomorrow!"
-	if u_count > CHAT_DAILY_LIMIT:
-		return f"You've used your {CHAT_DAILY_LIMIT} daily coach replies. Your limit resets at midnight - come back tomorrow!"
+	if not ent or ent.get("tier") != "free":
+		return None
+	limits = ent.get("limits") or {}
+	if mode == "coach" and limits.get("coach"):
+		if (row.get("u_coach") or 0) > limits["coach"]:
+			return f"You've used your {limits['coach']} daily coach chats on the Free plan. Upgrade to Pro for unlimited coaching, recap, and import."
+	if mode == "track" and limits.get("track"):
+		if (row.get("u_track") or 0) > limits["track"]:
+			return f"You've used your {limits['track']} daily tracked hands on the Free plan. Upgrade to Pro for unlimited tracking."
 	return None
+
+def _parse_ts(value):
+	if isinstance(value, (int, float)):
+		return datetime.fromtimestamp(float(value), timezone.utc)
+	if not value:
+		return None
+	try:
+		return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+	except Exception:
+		return None
+
+def entitlement(user_id, user_email=None):
+	if user_id and user_email and user_email.lower() in ADMIN_EMAILS:
+		return {"tier": "admin", "plan": "admin", "limits": tier_limits("admin")}
+	sub = None
+	if user_id:
+		try:
+			r = supabase.table("subscriptions").select("tier,status,current_period_end,stripe_subscription_id,stripe_customer_id").eq("user_id", user_id).execute()
+			if r.data:
+				sub = r.data[0]
+		except Exception:
+			sub = None
+	if sub and sub.get("tier") in ("pro", "premium", "legacy") and sub.get("status") in ("active", "trial", "legacy"):
+		expired = False
+		if sub.get("current_period_end"):
+			pe = _parse_ts(sub["current_period_end"])
+			if pe is not None and pe < datetime.now(timezone.utc) - timedelta(days=1):
+				expired = True
+		if not expired:
+			return {"tier": sub["tier"], "plan": sub["tier"], "limits": tier_limits(sub["tier"]), "subscription": sub}
+	created_at = None
+	if user_id:
+		try:
+			r = supabase.table("profiles").select("created_at").eq("user_id", user_id).execute()
+			if r.data:
+				created_at = r.data[0].get("created_at")
+		except Exception:
+			created_at = None
+	if created_at:
+		age = None
+		ts = _parse_ts(created_at)
+		if ts is not None:
+			age = (datetime.now(timezone.utc) - ts).days
+		if age is not None and age < TRIAL_DAYS:
+			return {"tier": "pro", "plan": "trial", "limits": tier_limits("pro")}
+	return {"tier": "free", "plan": "free", "limits": tier_limits("free")}
+
+def tier_limits(tier):
+	return PLAN_LIMITS.get(tier, PLAN_LIMITS["free"])
+
+def auth_identity(req):
+	auth_header = req.headers.get("authorization", "")
+	if not auth_header.startswith("Bearer "):
+		return None, None
+	token = auth_header[7:]
+	try:
+		resp = supabase.auth.get_user(token)
+		if resp and resp.user:
+			return resp.user.id, resp.user.email
+	except Exception:
+		pass
+	return None, None
+
+def upsert_subscription(user_id, tier, status, period_end=None, sub_id=None, customer_id=None):
+	row = {"user_id": user_id, "tier": tier, "status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+	if period_end:
+		row["current_period_end"] = period_end
+	if sub_id:
+		row["stripe_subscription_id"] = sub_id
+	if customer_id:
+		row["stripe_customer_id"] = customer_id
+	try:
+		supabase.table("subscriptions").upsert(row, on_conflict="user_id").execute()
+		return True
+	except Exception as exc:
+		discord_ping(f"upsert_subscription: {exc}")
+		return False
+
+def find_user_by_subscription(sub_id):
+	try:
+		r = supabase.table("subscriptions").select("user_id").eq("stripe_subscription_id", sub_id).execute()
+		if r.data:
+			return r.data[0]["user_id"]
+	except Exception:
+		pass
+	return None
+
+def stripe_api(method, path, payload=None, form=False, with_api_key=True):
+	if not STRIPE_SECRET_KEY:
+		return {"error": "Billing is not set up yet — come back soon."}
+	headers = {}
+	data = None
+	if payload is not None:
+		if form:
+			data = urllib.parse.urlencode(payload).encode()
+			headers["Content-Type"] = "application/x-www-form-urlencoded"
+		else:
+			data = json.dumps(payload).encode()
+			headers["Content-Type"] = "application/json"
+	req = urllib.request.Request("https://api.stripe.com/v1/" + path, data=data, method=method, headers=headers)
+	req.add_header("Authorization", "Basic " + base64.b64encode((STRIPE_SECRET_KEY + ":").encode()).decode())
+	try:
+		with urllib.request.urlopen(req, timeout=20) as res:
+			return json.loads(res.read().decode())
+	except urllib.error.HTTPError as e:
+		body = e.read().decode()
+		try:
+			err = json.loads(body)
+			msg = (err.get("error") or {}).get("message") or "Billing error"
+			return {"error": msg}
+		except Exception:
+			return {"error": body[:300]}
+	except Exception as exc:
+		return {"error": str(exc)}
+
+def verify_stripe_signature(payload, signature):
+	if not signature:
+		return False
+	try:
+		parts = {}
+		for item in signature.split(","):
+			if "=" in item:
+				k, v = item.split("=", 1)
+				parts[k] = v
+		ts = parts.get("t", "")
+		expected = parts.get("v1", "")
+		signed = (ts + "." + payload.decode()).encode()
+		digest = hmac.new(STRIPE_WEBHOOK_SECRET.encode(), signed, hashlib.sha256).hexdigest()
+		return hmac.compare_digest(digest, expected)
+	except Exception:
+		return False
 
 def discord_ping(text):
 	if not DISCORD_WEBHOOK_URL:
@@ -453,14 +618,20 @@ async def chat_endpoint(req: Request):
                 user_email = resp.user.email
         except:
             pass
-    limit_msg = check_chat_quota(user_email, user_id)
-    if limit_msg:
-        return {"reply": limit_msg, "parsed": {}}
+    ent = entitlement(user_id, user_email) if user_id else {"tier": "free", "plan": "free", "limits": tier_limits("free")}
     if mode == "recap":
         if not user_id:
             return {"reply": "Sign in to recap a session."}
+        if not (ent.get("limits") or {}).get("recap"):
+            return {"reply": "Recap is a Pro feature. Upgrade to unlock it and re-analyze any past session in one tap.", "parsed": {}, "paywall": "recap"}
+        limit_msg = check_chat_quota(user_email, user_id, "recap", ent)
+        if limit_msg:
+            return {"reply": limit_msg, "parsed": {}}
         reply, rid = recap_turn(user_input, user_id, body.get("session_id"))
         return {"reply": reply, "parsed": {}, "recap_session_id": rid}
+    limit_msg = check_chat_quota(user_email, user_id, mode if mode in ("coach", "track") else "chat", ent)
+    if limit_msg:
+        return {"reply": limit_msg, "parsed": {}}
     reply, parsed, session, tool_called, closed, logged_hands = run_pipeline(user_input, mode, user_id, body.get("units", "dollars"))
     if user_id and tool_called and not closed and not parsed.get("buyin"):
         batch = logged_hands if logged_hands else [parsed]
@@ -513,19 +684,16 @@ async def chat_endpoint(req: Request):
 
 @app.get("/api/sessions")
 async def sessions_endpoint(req: Request):
-    auth_header = req.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
+    user_id, email = auth_identity(req)
+    if not user_id:
         return {"error": "unauthorized"}
-    token = auth_header[7:]
+    ent = entitlement(user_id, email)
     try:
-        resp = supabase.auth.get_user(token)
-        if not resp or not resp.user:
-            return {"error": "unauthorized"}
-        user_id = resp.user.id
-    except:
-        return {"error": "unauthorized"}
-    try:
-        result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, units, label").eq("user_id", user_id).order("created_at", desc=True).execute()
+        q = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, units, label").eq("user_id", user_id)
+        hdays = (ent.get("limits") or {}).get("history_days")
+        if hdays:
+            q = q.gte("created_at", (datetime.now(timezone.utc) - timedelta(days=hdays)).isoformat())
+        result = q.order("created_at", desc=True).execute()
         sessions = result.data or []
     except Exception as exc:
         discord_ping(f"get sessions: {exc}")
@@ -570,7 +738,12 @@ async def history_endpoint(req: Request):
         if not resp or not resp.user:
             return {"error": "unauthorized"}
         user_id = resp.user.id
-        result = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).execute()
+        ent = entitlement(user_id, resp.user.email)
+        q = supabase.table("messages").select("id, input, reply, hand, tier, position, player_action, result, amount, created_at").eq("user_id", user_id)
+        hdays = (ent.get("limits") or {}).get("history_days")
+        if hdays:
+            q = q.gte("created_at", (datetime.now(timezone.utc) - timedelta(days=hdays)).isoformat())
+        result = q.order("created_at", desc=True).execute()
         return {"history": result.data}
     except Exception as e:
         return {"error": "unauthorized"}
@@ -795,9 +968,12 @@ async def session_rename(req: Request):
 
 @app.post("/api/import/session")
 async def import_session(req: Request):
-    uid = auth_user_id(req)
+    uid, email = auth_identity(req)
     if not uid:
         return {"error": "unauthorized"}
+    ent = entitlement(uid, email)
+    if not (ent.get("limits") or {}).get("import"):
+        return {"error": "Importing past sessions is a Pro feature. Upgrade to unlock it.", "paywall": "import"}
     try:
         body = await req.json()
     except:
@@ -1136,14 +1312,20 @@ def usernames_for(user_ids):
     except:
         return {}
 
-def session_stats(user_id):
+def session_stats(user_id, since=None):
     rows = []
     try:
-        res = supabase.table("sessions").select("id, profit, cashout, units, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
+        q = supabase.table("sessions").select("id, profit, cashout, units, created_at").eq("user_id", user_id).eq("status", "closed")
+        if since:
+            q = q.gte("created_at", since)
+        res = q.order("created_at", desc=True).execute()
         rows = list(res.data or [])
     except Exception:
         try:
-            res = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).execute()
+            q = supabase.table("sessions").select("id, profit, cashout, created_at").eq("user_id", user_id).eq("status", "closed")
+            if since:
+                q = q.gte("created_at", since)
+            res = q.order("created_at", desc=True).execute()
             rows = list(res.data or [])
         except Exception:
             pass
@@ -1185,7 +1367,7 @@ def session_stats(user_id):
 
 @app.get("/api/profile")
 async def profile_endpoint(req: Request):
-    user_id = auth_user_id(req)
+    user_id, email = auth_identity(req)
     if not user_id:
         return {"error": "unauthorized"}
     username = (req.query_params.get("username") or "").strip()
@@ -1199,8 +1381,13 @@ async def profile_endpoint(req: Request):
     if not rows:
         return {"error": "user not found"}
     target = rows[0]["user_id"]
+    ent = entitlement(user_id, email)
+    since = None
+    hdays = (ent.get("limits") or {}).get("history_days")
+    if hdays:
+        since = (datetime.now(timezone.utc) - timedelta(days=hdays)).isoformat()
     if target == user_id:
-        return {"profile": {"username": username, "stats": session_stats(target), "you": True}}
+        return {"profile": {"username": username, "stats": session_stats(target, since), "you": True}}
     if not are_friends(user_id, target):
         return {"error": "not friends"}
     return {"profile": {"username": username, "stats": session_stats(target)}}
@@ -1382,3 +1569,161 @@ async def resolve_login_endpoint(req: Request):
     if not email:
         return {"error": "user not found"}
     return {"email": email}
+
+@app.get("/api/usage")
+async def usage_endpoint(req: Request):
+    uid, email = auth_identity(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    ent = entitlement(uid, email)
+    counts = {"chats": 0, "coach": 0, "track": 0}
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        r = supabase.table("chat_usage").select("chats, coach, track").eq("day", today).eq("user_id", uid).execute()
+        if r.data and r.data[0]:
+            row = r.data[0]
+            counts = {"chats": row.get("chats") or 0, "coach": row.get("coach") or 0, "track": row.get("track") or 0}
+    except Exception:
+        pass
+    return {"tier": ent["tier"], "plan": ent["plan"], "limits": ent["limits"], "counts": counts, "trial_days": TRIAL_DAYS}
+
+@app.post("/api/stripe/checkout")
+async def stripe_checkout(req: Request):
+    uid, email = auth_identity(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    plan = str(body.get("plan") or "").lower()
+    price = None
+    if plan == "premium":
+        price = STRIPE_PREMIUM_PRICE
+    elif plan == "pro":
+        price = STRIPE_PRO_PRICE
+    if not price:
+        return {"error": "Billing isn't set up yet — check back soon."}
+    session = stripe_api("POST", "checkout/sessions", form=True, payload={
+        "mode": "subscription",
+        "customer_email": email or None,
+        "client_reference_id": uid,
+        "metadata[user_id]": uid,
+        "metadata[plan]": plan,
+        "line_items[0][price]": price,
+        "line_items[0][quantity]": "1",
+        "success_url": APP_URL + "/?plan=success",
+        "cancel_url": APP_URL + "/",
+    })
+    if not session.get("url"):
+        return {"error": session.get("error") or "Could not start checkout right now."}
+    return {"url": session["url"]}
+
+@app.post("/api/stripe/portal")
+async def stripe_portal(req: Request):
+    uid, _ = auth_identity(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    customer_id = None
+    try:
+        r = supabase.table("subscriptions").select("stripe_customer_id").eq("user_id", uid).execute()
+        if r.data and r.data[0].get("stripe_customer_id"):
+            customer_id = r.data[0]["stripe_customer_id"]
+    except Exception:
+        customer_id = None
+    if not customer_id:
+        return {"error": "No active subscription found for this account."}
+    res = stripe_api("POST", "billing_portal/sessions", form=True, payload={
+        "customer": customer_id,
+        "return_url": APP_URL + "/",
+    })
+    if not res.get("url"):
+        return {"error": res.get("error") or "Could not open billing settings right now."}
+    return {"url": res["url"]}
+
+@app.post("/api/stripe/webhook")
+async def stripe_webhook(req: Request):
+    raw = await req.body()
+    sig = req.headers.get("stripe-signature", "")
+    if not STRIPE_WEBHOOK_SECRET:
+        return {"error": "webhook not configured"}
+    if not verify_stripe_signature(raw, sig):
+        return {"error": "bad signature"}, 400
+    try:
+        event = json.loads(raw)
+        typ = event.get("type")
+        obj = event.get("data", {}).get("object", {})
+        if typ in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+            if obj.get("mode") != "subscription":
+                return {"ok": True}
+            uid = (obj.get("metadata") or {}).get("user_id") or obj.get("client_reference_id")
+            sub_id = obj.get("subscription")
+            customer_id = obj.get("customer")
+            status = "active"
+            period_end = None
+            if sub_id:
+                sub = stripe_api("GET", "subscriptions/" + sub_id, with_api_key=True)
+                status = sub.get("status") or "active"
+                pe = sub.get("current_period_end")
+                if pe:
+                    period_end = datetime.fromtimestamp(float(pe), timezone.utc).isoformat()
+            price_id = ""
+            items = obj.get("line_items") or {}
+            item_data = items.get("data") or []
+            if item_data:
+                price_id = ((item_data[0].get("price") or {}).get("id") or "")
+            plan = "premium" if price_id == STRIPE_PREMIUM_PRICE else ("pro" if price_id == STRIPE_PRO_PRICE else (obj.get("metadata") or {}).get("plan", "pro"))
+            if uid:
+                upsert_subscription(uid, plan, status, period_end, sub_id, customer_id)
+        elif typ == "customer.subscription.updated":
+            sub_id = obj.get("id") or ""
+            uid = find_user_by_subscription(sub_id)
+            if uid:
+                status = obj.get("status") or "active"
+                pe = obj.get("current_period_end")
+                period_end = datetime.fromtimestamp(float(pe), timezone.utc).isoformat() if pe else None
+                price_id = ""
+                items = obj.get("items") or {}
+                item_data = items.get("data") or []
+                if item_data:
+                    price_id = ((item_data[0].get("price") or {}).get("id") or "")
+                plan = "premium" if price_id == STRIPE_PREMIUM_PRICE else "pro"
+                mapped = {"active": "active", "trialing": "active", "past_due": "past_due", "unpaid": "past_due", "incomplete": "incomplete", "paused": "past_due"}
+                if status in mapped:
+                    upsert_subscription(uid, plan, mapped[status], period_end, sub_id, obj.get("customer"))
+                elif status in ("canceled", "incomplete_expired"):
+                    upsert_subscription(uid, "free", "canceled", period_end, sub_id, obj.get("customer"))
+        elif typ == "customer.subscription.deleted":
+            sub_id = obj.get("id") or ""
+            uid = find_user_by_subscription(sub_id)
+            if uid:
+                upsert_subscription(uid, "free", "canceled", None, sub_id, obj.get("customer"))
+    except Exception as exc:
+        discord_ping(f"stripe webhook: {exc}")
+        return {"error": str(exc)}, 500
+    return {"ok": True}
+
+@app.post("/api/admin/set-tier")
+async def admin_set_tier(req: Request):
+    uid, email = auth_identity(req)
+    if not uid or not email or email.lower() not in ADMIN_EMAILS:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    target = body.get("user_id") or uid
+    tier = str(body.get("tier") or "").lower()
+    if tier not in ("free", "pro", "premium", "legacy", "admin"):
+        return {"error": "bad tier"}
+    try:
+        months = float(body.get("months") or 0)
+    except (TypeError, ValueError):
+        months = 0
+    period_end = None
+    if months and months > 0:
+        period_end = (datetime.now(timezone.utc) + timedelta(days=30 * months)).isoformat()
+    status = "legacy" if tier == "legacy" else ("none" if tier == "free" else "active")
+    if not upsert_subscription(target, tier, status, period_end):
+        return {"error": "Could not update tier."}
+    return {"ok": True, "tier": tier}
