@@ -31,6 +31,7 @@ except Exception as exc:
 	startup_error = str(exc)
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+USER_AGENT = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
 
 def discord_ping(text):
 	if not DISCORD_WEBHOOK_URL:
@@ -38,7 +39,7 @@ def discord_ping(text):
 	def send():
 		try:
 			payload = json.dumps({"content": text}).encode()
-			req = urllib.request.Request(DISCORD_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json"})
+			req = urllib.request.Request(DISCORD_WEBHOOK_URL, data=payload, headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
 			urllib.request.urlopen(req, timeout=5)
 		except Exception:
 			pass
@@ -719,7 +720,7 @@ async def discord_share(req: Request):
         lres = supabase.table("discord_links").select("discord_id").eq("user_id", uid).execute()
         if lres.data and lres.data[0] and lres.data[0].get("discord_id"):
             msg += f" <@{lres.data[0]['discord_id']}>"
-        payload = urllib.request.Request(webhook, data=json.dumps({"content": msg}).encode(), headers={"Content-Type": "application/json"})
+        payload = urllib.request.Request(webhook, data=json.dumps({"content": msg}).encode(), headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
         try:
             urllib.request.urlopen(payload, timeout=10)
         except urllib.error.HTTPError as he:
@@ -1094,35 +1095,3 @@ async def resolve_login_endpoint(req: Request):
     if not email:
         return {"error": "user not found"}
     return {"email": email}
-
-@app.get("/api/debug-discord")
-async def debug_discord():
-    """TEMP: inspect the live Discord webhook env + ping both webhooks."""
-    share = os.environ.get("DISCORD_SHARE_WEBHOOK_URL", "")
-    update = os.environ.get("DISCORD_WEBHOOK_URL", "")
-    useragent = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
-    results = {"share_prefix": share[:25] if share else "MISSING", "update_prefix": update[:25] if update else "MISSING"}
-    for label, url in [("share", share), ("update", update)]:
-        if not url:
-            results[f"{label}_get"] = "no url"; results[f"{label}_post"] = "no url"
-            continue
-        try:
-            g = urllib.request.Request(url, headers={"User-Agent": useragent})
-            with urllib.request.urlopen(g, timeout=10) as r:
-                gd = json.loads(r.read().decode() or "{}")
-                results[f"{label}_get"] = f"HTTP {r.status} name={gd.get('name')} ch={gd.get('channel_id')} app={gd.get('application_id')} type={gd.get('type')}"
-        except urllib.error.HTTPError as e:
-            results[f"{label}_get"] = f"HTTP {e.code}: {e.reason}"
-        try:
-            p = urllib.request.Request(url, data=json.dumps({"content": f"ping {time.time():.0f}"}).encode(),
-                                       headers={"Content-Type": "application/json", "User-Agent": useragent})
-            with urllib.request.urlopen(p, timeout=10) as r:
-                results[f"{label}_post"] = f"HTTP {r.status} ok"
-        except urllib.error.HTTPError as e:
-            body = ""
-            try: body = e.read().decode(errors="replace")[:120]
-            except: pass
-            results[f"{label}_post"] = f"HTTP {e.code}: {body}"
-        except Exception as e:
-            results[f"{label}_post"] = str(e)[:120]
-    return results
