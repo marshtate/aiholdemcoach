@@ -34,6 +34,30 @@ const val = v === '' || v === null ? '' : String(parseFloat(v));
 currentDefaultBuyin = val;
 localStorage.setItem('aihc_default_buyin', val);
 }
+async function exportMyData() {
+const data = await authedFetch('/api/export');
+if (!data || data.error) { alert((data && data.error) || 'Could not export your data.'); return; }
+const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'ai-holdem-coach-export.json';
+document.body.appendChild(a);
+a.click();
+URL.revokeObjectURL(url);
+a.remove();
+}
+async function deleteMyAccount() {
+const check = prompt('This permanently deletes every hand, session, and stat. Type DELETE to confirm:');
+if (check === null) return;
+if ((check || '').trim().toLowerCase() !== 'delete') { alert('Not confirmed - your account was not deleted.'); return; }
+const res = await authedFetch('/api/account/delete', { method: 'POST', body: JSON.stringify({ confirm: 'delete' }) });
+if (res && res.error) { alert(res.error); return; }
+try { await sb.auth.signOut(); } catch (e) {}
+showAuth();
+closeSettings();
+alert('Your account and all data have been deleted. Goodbye!');
+}
 function applyTheme() {
 document.documentElement.setAttribute('data-theme', currentTheme);
 localStorage.setItem('aihc_theme', currentTheme);
