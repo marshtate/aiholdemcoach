@@ -239,8 +239,8 @@ def format_track(parsed, session=None, closed=False, logged_hands=None, units="d
 		p = parsed.get("profit", 0)
 		psym = "$" if (units or "dollars") == "dollars" else ""
 		psfx = "" if (units or "dollars") == "dollars" else (units or "dollars")
-		sign = "+" if p >= 0 else ""
-		return f"Session closed - {sign}{psym}{p}{psfx}."
+		sign = "+" if p >= 0 else "-"
+		return f"Session closed - {sign}{psym}{abs(p)}{psfx}."
 	if logged_hands:
 		out = []
 		for h in logged_hands:
