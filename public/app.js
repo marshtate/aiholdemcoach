@@ -145,7 +145,9 @@ else { sessionDot.className = 'w-3 h-3 bg-neutral-700 rounded-full'; }
 
 document.getElementById('signup-btn').addEventListener('click', async () => {
 const email = document.getElementById('email').value, password = document.getElementById('password').value;
-if (!email ||!password) { showError('Enter email and password.'); return; }
+if (!email || !password) { showError('Enter email and password.'); return; }
+const agree = document.getElementById('agree-terms');
+if (!agree || !agree.checked) { showError('Please tick the box to confirm you\'re 18+ and agree to the Terms & Privacy Policy.'); return; }
 const { data, error } = await sb.auth.signUp({ email, password });
 if (error) { showError(error.message); return; }
 if (data.session) showApp(); else showError('Account created. Check email to confirm.');
