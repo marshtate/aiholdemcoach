@@ -712,8 +712,10 @@ async def discord_share(req: Request):
         sess = sres.data[0] if (sres.data and sres.data[0]) else None
         if not sess:
             return {"error": "No completed session to share."}
-        hands_res = supabase.table("messages").select("hand").eq("session_id", sess["id"]).execute()
-        hand_count = len([h for h in (hands_res.data or []) if h.get("hand")])
+        hands_res = supabase.table("messages").select("hand, result").eq("session_id", sess["id"]).execute()
+        hands = [h for h in (hands_res.data or []) if h.get("hand")]
+        hand_count = len(hands)
+        won_count = len([h for h in hands if h.get("result") == "won"])
         buyin_total = session_buyin_total(sess["id"])
         p = sess.get("profit")
         pstr = f"{'+' if p >= 0 else ''}{p:.2f}" if p is not None else "0.00"
@@ -734,6 +736,13 @@ async def discord_share(req: Request):
             header += f" · {date_str}"
         lines.append(header)
         lines.append(f"Profit: **${pstr}** over **{hand_count} {'hand' if hand_count == 1 else 'hands'}**")
+        stats = []
+        if hand_count > 0:
+            stats.append(f"Win rate: **{won_count/hand_count*100:.0f}%**")
+        if buyin_total and p is not None:
+            stats.append(f"ROI: **{p/buyin_total*100:.0f}%**")
+        if stats:
+            lines.append(" · ".join(stats))
         if buyin_total:
             lines.append(f"Bought in: **${buyin_total:.2f}**")
         lines.append("· AI Holdem Coach")
