@@ -21,7 +21,7 @@ allow_methods=["*"],
 allow_headers=["*"],)
 
 try:
-	groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+	groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"), timeout=60.0, max_retries=2)
 	supabase: Client = create_client(os.environ.get("SUPABASE_URL"),
 									 os.environ.get("SUPABASE_SERVICE_KEY"),)
 	evaluator = Evaluator()
@@ -30,6 +30,27 @@ try:
 except Exception as exc:
 	startup_ok = False
 	startup_error = str(exc)
+
+GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
+
+def groq_ask(messages, tools=None, tool_choice=None):
+	last_err = None
+	for model in GROQ_MODELS:
+		for attempt in range(2):
+			try:
+				kwargs = {"model": model, "messages": messages}
+				if tools is not None:
+					kwargs["tools"] = tools
+					kwargs["tool_choice"] = tool_choice
+				return groq_client.chat.completions.create(**kwargs)
+			except Exception as e:
+				last_err = e
+				code = getattr(e, "status_code", 0)
+				if code in (429, 500, 502, 503, 504) or "rate limit" in str(e).lower():
+					time.sleep(0.6 * (attempt + 1))
+					continue
+				break
+	raise last_err
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 USER_AGENT = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
@@ -240,7 +261,7 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
     system_msg = build_system(mode, session)
     messages = [{"role": "system", "content": system_msg["content"]}, {"role": "user", "content": user_input}]
     try:
-        response = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=messages, tools=tools, tool_choice="auto")
+        response = groq_ask(messages, tools=tools, tool_choice="auto")
     except Exception as e:
         return f"AI error: {str(e)}", {}, session, False, False, []
     msg = response.choices[0].message
@@ -334,7 +355,7 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
         {"role": "user", "content": f"Asked: {user_input}\nData: {eval_data.strip()}"}
     ]
     try:
-        second = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=clean)
+        second = groq_ask(clean)
         return second.choices[0].message.content, parsed, session, tool_called, False, logged_hands
     except Exception:
         return format_track(parsed, session), parsed, session, tool_called, False, logged_hands
@@ -383,7 +404,7 @@ def recap_turn(user_input, user_id, session_id):
             msgs.append({"role": m["role"], "content": m["content"]})
         msgs.append({"role": "user", "content": user_input})
         try:
-            resp = groq_client.chat.completions.create(model="openai/gpt-oss-120b", messages=msgs)
+            resp = groq_ask(msgs)
             reply = resp.choices[0].message.content or ""
         except Exception as e:
             return f"AI error: {str(e)}", sid
