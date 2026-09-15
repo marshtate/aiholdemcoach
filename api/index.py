@@ -155,10 +155,17 @@ def entitlement(user_id, user_email=None):
 	if user_id:
 		try:
 			r = supabase.table("profiles").select("created_at").eq("user_id", user_id).execute()
-			if r.data:
-				created_at = r.data[0].get("created_at")
+			if r.data and r.data[0].get("created_at"):
+				created_at = r.data[0]["created_at"]
 		except Exception:
 			created_at = None
+		if not created_at:
+			try:
+				u = supabase.auth.admin.get_user_by_id(user_id)
+				uu = getattr(u, "user", None)
+				created_at = getattr(uu, "created_at", None) if uu else None
+			except Exception:
+				created_at = None
 	if created_at:
 		age = None
 		ts = _parse_ts(created_at)
