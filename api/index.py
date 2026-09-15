@@ -525,7 +525,7 @@ async def sessions_endpoint(req: Request):
     except:
         return {"error": "unauthorized"}
     try:
-        result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, units").eq("user_id", user_id).order("created_at", desc=True).execute()
+        result = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, units, label").eq("user_id", user_id).order("created_at", desc=True).execute()
         sessions = result.data or []
     except Exception as exc:
         discord_ping(f"get sessions: {exc}")
