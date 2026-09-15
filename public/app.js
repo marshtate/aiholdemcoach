@@ -950,11 +950,15 @@ async function loadDiscordServer() {
 const el = document.getElementById('discord-server-status');
 if (!el) return;
 const data = await authedFetch('/api/discord/widget');
+const link = await authedFetch('/api/discord/link');
 if (!data) { el.innerHTML = '<p class="text-xs text-gray-500">Could not load the server widget.</p>'; return; }
 let html = '';
 const invite = data.invite || 'https://discord.gg/KB4rNwnea';
 if (data.ok) {
 html += `<p class="text-xs text-emerald-400"><span class="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5 pulse-green"></span>${data.presence_count} online now</p>`;
+}
+if (link && link.linked) {
+html += `<button onclick="shareTonight()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Share my latest night</button>`;
 }
 html += `<a href="${invite}" target="_blank" rel="noopener" class="inline-block bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Join Discord</a>`;
 if (!data.ok) html += '<p class="text-[10px] text-gray-600">Live presence hidden - widget not enabled in server settings.</p>';
@@ -969,8 +973,7 @@ if (!config || !config.enabled) { statusEl.innerHTML = '<p class="text-gray-500"
 if (!link || !link.linked) {
 statusEl.innerHTML = `<button onclick="startDiscordLink()" class="bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Connect Discord</button>`;
 } else {
-statusEl.innerHTML = `<p class="text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>
-<button onclick="shareTonight()" class="bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition mt-2">Share my latest night</button>`;
+statusEl.innerHTML = `<p class="text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>`;
 }
 }
 async function startDiscordLink() {
@@ -986,7 +989,7 @@ const data = await authedFetch('/api/discord/share', { method: 'POST', body: JSO
 if (data && data.error) { alert(data.error); return; }
 const s = document.getElementById('discord-status');
 if (s) s.innerHTML = '<p class="text-emerald-400">Posted! Check your Discord channel.</p>';
-setTimeout(() => loadDiscordStatus(), 3000);
+setTimeout(() => { loadDiscordStatus(); loadDiscordServer(); }, 3000);
 }
 async function handleDiscordCallback() {
 const params = new URLSearchParams(window.location.search);
