@@ -793,6 +793,56 @@ async def session_rename(req: Request):
         discord_ping(f"session rename: {exc}")
         return {"error": str(exc)}
 
+@app.post("/api/import/session")
+async def import_session(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        return {"error": "bad request"}
+    date = str(body.get("date") or "").strip()
+    if not date:
+        return {"error": "Pick a date."}
+    units = str(body.get("units") or "dollars").lower()
+    if units not in ("dollars", "bb", "chips"):
+        units = "dollars"
+    try:
+        buyins = round(float(body.get("buyins") or 0), 2)
+    except (TypeError, ValueError):
+        return {"error": "Buy-in must be a number."}
+    if buyins < 0:
+        return {"error": "Buy-in can't be negative."}
+    label = str(body.get("label") or "").strip()[:40] or None
+    cashout, profit = None, None
+    try:
+        if body.get("use_profit"):
+            profit = float(body.get("profit"))
+        else:
+            cashout = float(body.get("cashout"))
+            if cashout < 0:
+                return {"error": "Cash-out can't be negative."}
+    except (TypeError, ValueError):
+        return {"error": "Enter a valid result amount."}
+    final_profit = round(profit, 2) if profit is not None else (round(cashout - buyins, 2) if cashout is not None else None)
+    try:
+        row = {"user_id": uid, "units": units, "status": "closed", "label": label,
+               "profit": final_profit, "cashout": None if body.get("use_profit") else cashout,
+               "created_at": date, "closed_at": date}
+        inserted = supabase.table("sessions").insert(row).execute()
+        sid = inserted.data[0]["id"]
+        if buyins > 0:
+            supabase.table("buyins").insert({"session_id": sid, "user_id": uid, "amount": buyins, "created_at": date}).execute()
+        bankroll_applied = False
+        if body.get("apply_bankroll") and units == "dollars" and final_profit is not None and final_profit != 0:
+            credit_bankroll(uid, final_profit)
+            bankroll_applied = True
+        return {"ok": True, "session_id": sid, "profit": final_profit, "bankroll_applied": bankroll_applied}
+    except Exception as exc:
+        discord_ping(f"import session: {exc}")
+        return {"error": str(exc)}
+
 DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
 DISCORD_GUILD_ID = os.environ.get("DISCORD_GUILD_ID") or "1549096373977354271"
