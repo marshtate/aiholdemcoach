@@ -66,3 +66,40 @@ create table if not exists public.bankrolls (
   updated_at timestamptz not null default now()
 );
 alter table public.bankrolls enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Chat usage counters (cost guard). Run in the Supabase SQL editor.
+-- 'sessions', 'messages' etc. are ruled by no-policy RLS; these rows are only
+-- ever written through the server (service key), never from the browser.
+-- ---------------------------------------------------------------------------
+create table if not exists public.chat_usage (
+  day text not null,
+  user_id uuid not null,
+  chats bigint not null default 1,
+  primary key (day, user_id)
+);
+alter table public.chat_usage enable row level security;
+
+-- Atomically +1 the counter for (day,user) and the global sentinel, then
+-- return both totals so the server can enforce per-user and total caps.
+create or replace function public.bump_chat_usage(p_day text, p_user uuid, p_global uuid)
+returns table (u_count bigint, g_count bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.chat_usage (day, user_id, chats) values (p_day, p_user, 1)
+    on conflict (day, user_id) do update set chats = public.chat_usage.chats + 1;
+  insert into public.chat_usage (day, user_id, chats) values (p_day, p_global, 1)
+    on conflict (day, user_id) do update set chats = public.chat_usage.chats + 1;
+  return query
+    select
+      (select chats from public.chat_usage where day = p_day and user_id = p_user),
+      (select chats from public.chat_usage where day = p_day and user_id = p_global);
+end;
+$$;
+
+-- Only the server (service_role) may call it; anons can't inflate the counters.
+revoke execute on function public.bump_chat_usage(text, uuid, uuid) from anon, authenticated, public;
+grant execute on function public.bump_chat_usage(text, uuid, uuid) to service_role;
