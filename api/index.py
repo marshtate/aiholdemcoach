@@ -733,7 +733,7 @@ async def discord_share(req: Request):
         if date_str:
             header += f" · {date_str}"
         lines.append(header)
-        lines.append(f"Profit: **${pstr}** over **{hand_count} hands**")
+        lines.append(f"Profit: **${pstr}** over **{hand_count} {'hand' if hand_count == 1 else 'hands'}**")
         if buyin_total:
             lines.append(f"Bought in: **${buyin_total:.2f}**")
         lines.append("· AI Holdem Coach")
