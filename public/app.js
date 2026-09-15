@@ -934,9 +934,31 @@ html += `<div id="discord-card" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <p class="text-xs text-gray-500">Post your nights to the community server and tag yourself.</p>
 <div id="discord-status" class="text-xs text-gray-400">Loading...</div>
 </div>`;
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
+<h3 class="text-sm font-semibold text-gray-300">Discord server</h3>
+<p class="text-xs text-gray-500">Join the table, ask about hands, and share your nights.</p>
+<div id="discord-server-status" class="space-y-2">
+<p class="text-xs text-gray-400">Loading...</p>
+</div>
+</div>`;
 el.innerHTML = html;
 loadLeaderboard();
 loadDiscordStatus();
+loadDiscordServer();
+}
+async function loadDiscordServer() {
+const el = document.getElementById('discord-server-status');
+if (!el) return;
+const data = await authedFetch('/api/discord/widget');
+if (!data) { el.innerHTML = '<p class="text-xs text-gray-500">Could not load the server widget.</p>'; return; }
+let html = '';
+const invite = data.invite || 'https://discord.gg/KB4rNwnea';
+if (data.ok) {
+html += `<p class="text-xs text-emerald-400"><span class="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5 pulse-green"></span>${data.presence_count} online now</p>`;
+}
+html += `<a href="${invite}" target="_blank" rel="noopener" class="inline-block bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Join Discord</a>`;
+if (!data.ok) html += '<p class="text-[10px] text-gray-600">Live presence hidden - widget not enabled in server settings.</p>';
+el.innerHTML = html;
 }
 async function loadDiscordStatus() {
 const statusEl = document.getElementById('discord-status');
