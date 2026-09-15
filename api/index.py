@@ -562,6 +562,36 @@ async def history_delete(req: Request):
         discord_ping(f"history delete: {exc}")
         return {"error": str(exc)}
 
+@app.post("/api/session/start")
+async def session_start(req: Request):
+    uid = auth_user_id(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except:
+        body = {}
+    try:
+        amount = body.get("amount")
+        amount = float(amount) if amount not in (None, "") else 0
+        if amount < 0:
+            amount = 0
+    except (TypeError, ValueError):
+        return {"error": "Enter a valid buy-in amount."}
+    try:
+        sid = get_or_create_session(uid)
+        if not sid:
+            return {"error": "Could not start a session right now."}
+        if amount > 0:
+            try:
+                supabase.table("buyins").insert({"session_id": sid, "user_id": uid, "amount": round(amount, 2)}).execute()
+            except Exception as exc:
+                discord_ping(f"session/start buyin: {exc}")
+        return {"ok": True, "session_id": sid, "buyins_total": session_buyin_total(sid)}
+    except Exception as exc:
+        discord_ping(f"session/start: {exc}")
+        return {"error": str(exc)}
+
 @app.get("/api/session")
 async def session_detail(req: Request):
     uid = auth_user_id(req)
