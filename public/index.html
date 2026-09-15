@@ -169,6 +169,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </main>
 <footer id="chat-footer" class="p-3 pb-[calc(env(safe-area-inset-bottom)+96px)] bg-black/90 border-t border-neutral-800 flex-shrink-0">
 <div id="quick-chips" class="hidden flex items-center gap-2 mb-2 overflow-x-auto no-scrollbar"></div>
+<p id="quota-pill" class="hidden text-[10px] text-gray-500 mb-1"></p>
 <form id="chat-form" class="flex items-center gap-2" onsubmit="sendMessage(event)">
 <input id="user-input" type="text" placeholder="Type your hand..." autocomplete="off" class="flex-1 bg-[#1a1a1a] text-gray-100 text-sm rounded-full px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800 transition placeholder-gray-500" />
 <button type="submit" id="send-btn" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white p-3 rounded-full transition shadow-md flex items-center justify-center disabled:opacity-50">
@@ -228,6 +229,44 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 </div>
 </div>
+<div id="plan-modal" class="hidden fixed inset-0 z-[80] p-6">
+<div id="plan-backdrop" class="absolute inset-0 bg-black/80" onclick="hidePlanModal()"></div>
+<div class="relative bg-[#1a1a1a] border border-neutral-800 rounded-2xl p-5 w-full max-w-sm space-y-5 shadow-2xl max-h-[85vh] overflow-y-auto overscroll-contain">
+<div class="flex items-center justify-between">
+<h2 class="font-semibold text-gray-100">Choose your plan</h2>
+<button onclick="hidePlanModal()" class="text-gray-500 hover:text-gray-300 p-1" aria-label="Close plans">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 010-1.06z" clip-rule="evenodd"/></svg>
+</button>
+</div>
+<div class="space-y-3">
+<div class="bg-black border border-neutral-800 rounded-xl p-4 space-y-1">
+<div class="flex justify-between items-center">
+<p class="font-semibold text-gray-200">Free</p>
+<p class="text-sm font-bold text-gray-400">$0</p>
+</div>
+<p class="text-xs text-gray-500">5 coach chats + 10 tracked hands per day. 30-day history. No recap or import.</p>
+<p class="text-[10px] text-gray-600">That's plenty to test the waters.</p>
+</div>
+<div class="bg-black border border-neutral-800 rounded-xl p-4 space-y-1">
+<div class="flex justify-between items-center">
+<p class="font-semibold text-emerald-400">Pro</p>
+<p class="text-sm font-bold text-gray-200">$4.99<span class="text-[10px] text-gray-500 font-normal">/mo</span></p>
+</div>
+<p class="text-xs text-gray-500">Unlimited coaching and tracking, full history, recap mode, and importing past sessions.</p>
+<button onclick="openCheckout('pro')" class="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Upgrade to Pro</button>
+</div>
+<div class="bg-black border border-neutral-800 rounded-xl p-4 space-y-1">
+<div class="flex justify-between items-center">
+<p class="font-semibold text-purple-400">Premium</p>
+<p class="text-sm font-bold text-gray-200">$9.99<span class="text-[10px] text-gray-500 font-normal">/mo</span></p>
+</div>
+<p class="text-xs text-gray-500">Everything in Pro, priority support, and early access to new features.</p>
+<button onclick="openCheckout('premium')" class="w-full mt-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Upgrade to Premium</button>
+</div>
+</div>
+<p id="plan-cta-note" class="text-[10px] text-gray-600 text-center">New accounts get 7 days of Pro free. Cancel anytime.</p>
+</div>
+</div>
 <nav id="bottom-nav" class="hidden fixed bottom-0 left-0 right-0 bg-black/90 border-t border-neutral-800 backdrop-blur flex justify-around py-2 pb-6 z-10">
 <button id="tab-home" class="flex flex-col items-center gap-0.5 py-1 px-3">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 nav-icon text-emerald-400"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 11-1.06 1.06l-.97-.97V19.5a2.25 2.25 0 01-2.25 2.25h-3a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21.75a.75.75 0 01-.75.75h-3A2.25 2.25 0 013 19.5v-6.88l-.97.97a.75.75 0 01-1.06-1.06l8.69-8.69z"/></svg>
@@ -280,6 +319,15 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <p class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1">Default buy-in</p>
 <p class="text-[10px] text-gray-500 mb-2">Prefilled amount when you start a session.</p>
 <input id="default-buyin" type="number" inputmode="decimal" min="0" step="1" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500" onchange="setDefaultBuyin(this.value)">
+</div>
+<div class="pt-3 border-t border-neutral-800 space-y-2">
+<p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Plan</p>
+<div class="flex items-center justify-between gap-2">
+<span id="settings-plan-value" class="text-sm text-gray-200 font-semibold">Free</span>
+<button id="settings-plan-btn" onclick="showPlanModal()" class="text-xs font-semibold text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-lg border border-neutral-800 transition">See plans</button>
+</div>
+<p id="settings-plan-trial" class="hidden text-[10px] text-gray-500">Trial: full Pro access for 7 days, then it comes down. No card needed.</p>
+<p class="text-[10px] text-gray-600">Recap, import, and unlimited tracking are Pro features.</p>
 </div>
 <p class="text-[10px] text-gray-600">Settings save automatically on this device.</p>
 <div class="pt-3 border-t border-neutral-800 space-y-2">
