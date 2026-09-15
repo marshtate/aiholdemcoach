@@ -14,6 +14,7 @@ let recapSessionId = null;
 const settingsBtn = document.getElementById('settings-btn');
 let currentTheme = localStorage.getItem('aihc_theme') || 'dark';
 let currentUnits = localStorage.getItem('aihc_units') || 'dollars';
+let currentDefaultBuyin = localStorage.getItem('aihc_default_buyin') === null ? '5' : localStorage.getItem('aihc_default_buyin');
 function seg(el, on) {
 if (!el) return;
 if (on) el.className = el.className.replace('mode-inactive', 'mode-active');
@@ -25,6 +26,13 @@ seg(document.getElementById('theme-light-btn'), currentTheme === 'light');
 seg(document.getElementById('unit-dollars-btn'), currentUnits === 'dollars');
 seg(document.getElementById('unit-bb-btn'), currentUnits === 'bb');
 seg(document.getElementById('unit-chips-btn'), currentUnits === 'chips');
+const db = document.getElementById('default-buyin');
+if (db) db.value = currentDefaultBuyin;
+}
+function setDefaultBuyin(v) {
+const val = v === '' || v === null ? '' : String(parseFloat(v));
+currentDefaultBuyin = val;
+localStorage.setItem('aihc_default_buyin', val);
 }
 function applyTheme() {
 document.documentElement.setAttribute('data-theme', currentTheme);
@@ -306,7 +314,7 @@ if (sessionStarting) return;
 const data = await authedFetch('/api/sessions');
 const hasOpen = data && (data.sessions || []).some(s => s.status === 'open');
 if (hasOpen) { refreshSessionBanner(); return; }
-const amtStr = prompt('Buy-in amount ($) - or leave blank to start without one:', '5');
+const amtStr = prompt('Buy-in amount ($) - or leave blank to start without one:', currentDefaultBuyin || '5');
 if (amtStr === null) return;
 let amount = 0;
 if (amtStr.trim() !== '') {
