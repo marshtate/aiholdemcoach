@@ -58,6 +58,55 @@ showAuth();
 closeSettings();
 alert('Your account and all data have been deleted. Goodbye!');
 }
+function toggleImportForm() {
+const f = document.getElementById('import-form');
+const t = document.getElementById('import-toggle');
+if (f.classList.contains('hidden')) { f.classList.remove('hidden'); t.textContent = 'Hide form'; }
+else { f.classList.add('hidden'); t.textContent = 'Add past session'; }
+}
+function toggleImportResult() {
+const as = document.getElementById('import-as').value;
+const cw = document.getElementById('import-cashout-wrap');
+const pw = document.getElementById('import-profit-wrap');
+if (as === 'profit') { cw.classList.add('hidden'); pw.classList.remove('hidden'); }
+else { pw.classList.add('hidden'); cw.classList.remove('hidden'); }
+}
+function onImportUnitsChange() {
+const u = document.getElementById('import-units').value;
+const cb = document.getElementById('import-bankroll');
+const hint = document.getElementById('import-bankroll-hint');
+if (u !== 'dollars') { cb.checked = false; cb.disabled = true; hint.classList.remove('hidden'); }
+else { cb.disabled = false; hint.classList.add('hidden'); }
+}
+async function addPastSession() {
+const status = document.getElementById('import-status');
+status.textContent = '';
+const date = document.getElementById('import-date').value;
+if (!date) { status.textContent = 'Pick a date for the session.'; return; }
+const buyins = parseFloat(document.getElementById('import-buyin').value) || 0;
+const as = document.getElementById('import-as').value;
+let use_profit = as === 'profit';
+let cashout = null, profit = null;
+if (use_profit) {
+profit = parseFloat(document.getElementById('import-profit').value);
+if (isNaN(profit)) { status.textContent = 'Enter a profit or loss amount.'; return; }
+} else {
+cashout = parseFloat(document.getElementById('import-cashout').value);
+if (isNaN(cashout) || cashout < 0) { status.textContent = 'Enter a cash-out amount.'; return; }
+}
+const units = document.getElementById('import-units').value;
+const label = document.getElementById('import-label').value.trim();
+const apply = document.getElementById('import-bankroll').checked;
+status.textContent = 'Adding...';
+const res = await authedFetch('/api/import/session', { method: 'POST', body: JSON.stringify({ date: date, label: label, buyins: buyins, cashout: cashout, profit: use_profit ? profit : null, use_profit: use_profit, units: units, apply_bankroll: apply }) });
+if (!res || res.error) { status.textContent = (res && res.error) || 'Something went wrong.'; return; }
+status.textContent = 'Added. It now shows in your stats.';
+document.getElementById('import-date').value = '';
+document.getElementById('import-label').value = '';
+document.getElementById('import-buyin').value = '';
+if (use_profit) document.getElementById('import-profit').value = '';
+else document.getElementById('import-cashout').value = '';
+}
 function applyTheme() {
 document.documentElement.setAttribute('data-theme', currentTheme);
 localStorage.setItem('aihc_theme', currentTheme);
