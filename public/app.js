@@ -11,6 +11,8 @@ let currentMode = 'coach';
 let cachedHistory = null;
 let recapActive = false;
 let recapSessionId = null;
+let __usage = null;
+let __dismissedGoPro = localStorage.getItem('aihc_gopro_dismissed') === '1';
 const settingsBtn = document.getElementById('settings-btn');
 let currentTheme = localStorage.getItem('aihc_theme') || 'dark';
 let currentUnits = localStorage.getItem('aihc_units') || 'dollars';
@@ -28,6 +30,8 @@ seg(document.getElementById('unit-bb-btn'), currentUnits === 'bb');
 seg(document.getElementById('unit-chips-btn'), currentUnits === 'chips');
 const db = document.getElementById('default-buyin');
 if (db) db.value = currentDefaultBuyin;
+updatePlanLabel();
+updateQuotaPill();
 }
 function setDefaultBuyin(v) {
 const val = v === '' || v === null ? '' : String(parseFloat(v));
@@ -59,6 +63,7 @@ closeSettings();
 alert('Your account and all data have been deleted. Goodbye!');
 }
 function toggleImportForm() {
+if (__usage && __usage.tier === 'free') { paywallNotice('import'); return; }
 const f = document.getElementById('import-form');
 const t = document.getElementById('import-toggle');
 if (f.classList.contains('hidden')) { f.classList.remove('hidden'); t.textContent = 'Hide form'; }
@@ -77,6 +82,88 @@ const cb = document.getElementById('import-bankroll');
 const hint = document.getElementById('import-bankroll-hint');
 if (u !== 'dollars') { cb.checked = false; cb.disabled = true; hint.classList.remove('hidden'); }
 else { cb.disabled = false; hint.classList.add('hidden'); }
+}
+function planLabel(plan) {
+const labels = { free: 'Free', pro: 'Pro', premium: 'Premium', trial: '7-day trial', legacy: 'Pro (legacy)', admin: 'Admin' };
+return labels[plan] || plan || 'Free';
+}
+function updateQuotaPill() {
+const el = document.getElementById('quota-pill');
+if (el && __usage && __usage.tier === 'free') {
+const c = __usage.counts || {};
+const l = __usage.limits || {};
+const parts = [];
+if (l.coach) parts.push('Coach left today: ' + Math.max(0, l.coach - (c.coach || 0)));
+if (l.track) parts.push('Hands left: ' + Math.max(0, l.track - (c.track || 0)));
+el.textContent = parts.join(' · ');
+el.classList.remove('hidden');
+} else if (el) el.classList.add('hidden');
+}
+function updatePlanLabel() {
+const val = document.getElementById('settings-plan-value');
+const btn = document.getElementById('settings-plan-btn');
+const trial = document.getElementById('settings-plan-trial');
+if (!val) return;
+if (__usage) {
+val.textContent = planLabel(__usage.plan);
+if (__usage.plan === 'trial') { if (trial) trial.classList.remove('hidden'); }
+else if (trial) trial.classList.add('hidden');
+if (btn) {
+if (__usage.tier === 'free') { btn.textContent = 'See plans'; btn.onclick = showPlanModal; }
+else if (__usage.tier === 'admin') { btn.textContent = '—'; btn.onclick = null; }
+else { btn.textContent = 'Manage'; btn.onclick = managePlan; }
+}
+} else {
+val.textContent = 'Free';
+if (trial) trial.classList.add('hidden');
+if (btn) { btn.textContent = 'See plans'; btn.onclick = showPlanModal; }
+}
+}
+async function refreshUsage() {
+try {
+const r = await authedFetch('/api/usage');
+if (r && !r.error) __usage = r;
+} catch {}
+updatePlanLabel();
+updateQuotaPill();
+const hv = document.getElementById('home-view');
+if (hv && !hv.classList.contains('hidden')) loadHome();
+}
+function showPlanModal() {
+const m = document.getElementById('plan-modal');
+if (!m) return;
+m.classList.remove('hidden');
+m.classList.add('flex', 'items-center', 'justify-center');
+}
+function hidePlanModal() {
+const m = document.getElementById('plan-modal');
+if (!m) return;
+m.classList.add('hidden');
+m.classList.remove('flex', 'items-center', 'justify-center');
+}
+async function openCheckout(plan) {
+if (plan === 'premium' || plan === 'pro') {
+const res = await authedFetch('/api/stripe/checkout', { method: 'POST', body: JSON.stringify({ plan: plan }) });
+if (res && res.url) { window.location.href = res.url; return; }
+alert((res && res.error) || 'Billing is not set up yet. Come back soon.');
+hidePlanModal();
+}
+}
+async function managePlan() {
+const res = await authedFetch('/api/stripe/portal', { method: 'POST' });
+if (res && res.url) { window.location.href = res.url; return; }
+alert((res && res.error) || 'No active subscription found for this account.');
+}
+function dismissGoPro() {
+__dismissedGoPro = true;
+localStorage.setItem('aihc_gopro_dismissed', '1');
+const card = document.getElementById('gopro-card');
+if (card) card.remove();
+}
+function paywallNotice(feature) {
+if (!document.getElementById('plan-modal')) return;
+showPlanModal();
+refreshUsage();
 }
 async function addPastSession() {
 const status = document.getElementById('import-status');
@@ -99,7 +186,9 @@ const label = document.getElementById('import-label').value.trim();
 const apply = document.getElementById('import-bankroll').checked;
 status.textContent = 'Adding...';
 const res = await authedFetch('/api/import/session', { method: 'POST', body: JSON.stringify({ date: date, label: label, buyins: buyins, cashout: cashout, profit: use_profit ? profit : null, use_profit: use_profit, units: units, apply_bankroll: apply }) });
-if (!res || res.error) { status.textContent = (res && res.error) || 'Something went wrong.'; return; }
+if (!res || res.error) {
+if (res && res.paywall) { status.textContent = res.error || 'This is a Pro feature.'; showPlanModal(); return; }
+status.textContent = (res && res.error) || 'Something went wrong.'; return; }
 status.textContent = 'Added. It now shows in your stats.';
 document.getElementById('import-date').value = '';
 document.getElementById('import-label').value = '';
@@ -158,6 +247,7 @@ settingsBtn.classList.remove('hidden');
 checkSession();
 loadHome();
 showOnboarding();
+refreshUsage();
 }
 function showAuth() {
 const splash = document.getElementById('splash');
@@ -358,6 +448,7 @@ chatbox.scrollTop = chatbox.scrollHeight;
 }
 async function startRecap() {
 if (!recapSessionId || recapActive) return;
+if (__usage && __usage.tier === 'free') { recapActive = false; paywallNotice('recap'); return; }
 recapActive = true;
 const chatbox = document.getElementById('chatbox');
 chatbox.innerHTML = `<div class="flex items-start"><div class="bg-purple-900/40 text-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">Recap mode - I'll go over your finished session, hand by hand. This conversation doesn't touch your logged hands or stats.</div></div>`;
@@ -621,6 +712,21 @@ return `<button onclick="openSession(${s.id}, 'home-view')" class="w-full flex j
 }
 
 el.innerHTML = html;
+}
+if (__usage && __usage.tier === 'free' && !__dismissedGoPro) {
+const card = `<div id="gopro-card" class="bg-black border border-neutral-800 rounded-xl p-4 space-y-2 mb-3">
+<div class="flex items-center justify-between gap-3">
+<div>
+<p class="text-sm font-semibold text-gray-200">Unlimited with Pro</p>
+<p class="text-xs text-gray-500">No daily caps, recap mode, import past sessions, and full history.</p>
+</div>
+<button onclick="dismissGoPro()" class="text-gray-500 hover:text-gray-300 p-1 flex-shrink-0" aria-label="Dismiss">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 010-1.06z" clip-rule="evenodd"/></svg>
+</button>
+</div>
+<button onclick="showPlanModal()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition mt-1">See plans</button>
+</div>`;
+document.getElementById('home-view').insertAdjacentHTML('afterbegin', card);
 }
 async function loadHistory() {
 const entries = await fetchHistory();
@@ -907,12 +1013,17 @@ const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.st
 const data = await res.json();
 lb.textContent = data.reply || data.error || 'No response.';
 if (!recapActive) cachedHistory = null;
+if (data.paywall) {
+if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
+showPlanModal();
+}
 if (data.reply && data.reply.includes('Session closed') && !recapActive) {
 checkSession();
 offerRecap();
 }
 if (recapActive && data.recap_session_id) recapSessionId = data.recap_session_id;
 refreshSessionBanner();
+refreshUsage();
 } catch { lb.textContent = 'Error: Could not reach the server.'; }
 finally { input.disabled = false; sendBtn.disabled = false; input.blur(); setTimeout(() => { chatbox.scrollTop = chatbox.scrollHeight; }, 100); }
 }
@@ -1159,6 +1270,7 @@ else goToTab('stats');
 });
 }
 function recapSession(sid) {
+if (__usage && __usage.tier === 'free') { paywallNotice('recap'); return; }
 recapSessionId = sid;
 recapActive = false;
 goToTab('chat');
