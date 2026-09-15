@@ -103,3 +103,8 @@ $$;
 -- Only the server (service_role) may call it; anons can't inflate the counters.
 revoke execute on function public.bump_chat_usage(text, uuid, uuid) from anon, authenticated, public;
 grant execute on function public.bump_chat_usage(text, uuid, uuid) to service_role;
+
+-- Each session records the unit its numbers came in. Money math (bankroll,
+-- leaderboard, ROI) uses dollar sessions only; bb/chips sessions are tracked
+-- for hands/history but never mixed into $ figures. Existing rows = dollars.
+alter table public.sessions add column if not exists units text not null default 'dollars';
