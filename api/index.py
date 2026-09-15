@@ -719,11 +719,18 @@ async def discord_share(req: Request):
         if lres.data and lres.data[0] and lres.data[0].get("discord_id"):
             msg += f" <@{lres.data[0]['discord_id']}>"
         payload = urllib.request.Request(webhook, data=json.dumps({"content": msg}).encode(), headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(payload, timeout=10)
+        try:
+            urllib.request.urlopen(payload, timeout=10)
+        except urllib.error.HTTPError as he:
+            discord_ping(f"discord share {he.code} {he.reason}: {msg[:80]}")
+            code = he.code
+            if code in (403, 404):
+                return {"error": "Discord rejected the share — the share webhook looks out of date. Recreate it in your Discord server and check the app's Discord setup."}
+            return {"error": f"Discord didn't accept the share ({code}). Try again in a minute."}
         return {"ok": True}
     except Exception as exc:
         discord_ping(f"discord share: {exc}")
-        return {"error": "Could not post to Discord."}
+        return {"error": "Could not post to Discord right now. Try again in a minute."}
 
 def ensure_profile(user_id):
     try:
@@ -1086,23 +1093,3 @@ async def resolve_login_endpoint(req: Request):
     if not email:
         return {"error": "user not found"}
     return {"email": email}
-
-@app.get("/api/debug-discord")
-async def debug_discord():
-    """TEMP: pings both Discord webhooks to check if they're alive."""
-    import time as _time
-    share = os.environ.get("DISCORD_SHARE_WEBHOOK_URL", "")
-    update = os.environ.get("DISCORD_WEBHOOK_URL", "")
-    results = {"share_len": len(share), "update_len": len(update), "share_prefix": share[:20] if share else "MISSING"}
-    for label, url in [("share", share), ("update", update)]:
-        if not url:
-            results[f"{label}_ping"] = "no url"
-            continue
-        try:
-            req = urllib.request.Request(url, data=json.dumps({"content": f"ping {_time.time():.0f}"}).encode(),
-                                        headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=10)
-            results[f"{label}_ping"] = "ok"
-        except Exception as e:
-            results[f"{label}_ping"] = str(e)[:120]
-    return results
