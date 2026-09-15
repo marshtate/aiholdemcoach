@@ -1100,18 +1100,29 @@ async def debug_discord():
     """TEMP: inspect the live Discord webhook env + ping both webhooks."""
     share = os.environ.get("DISCORD_SHARE_WEBHOOK_URL", "")
     update = os.environ.get("DISCORD_WEBHOOK_URL", "")
+    useragent = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
     results = {"share_prefix": share[:25] if share else "MISSING", "update_prefix": update[:25] if update else "MISSING"}
     for label, url in [("share", share), ("update", update)]:
         if not url:
-            results[f"{label}_ping"] = "no url"
+            results[f"{label}_get"] = "no url"; results[f"{label}_post"] = "no url"
             continue
         try:
-            req = urllib.request.Request(url, data=json.dumps({"content": f"ping {time.time():.0f}"}).encode(),
-                                        headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=10)
-            results[f"{label}_ping"] = "ok"
+            g = urllib.request.Request(url, headers={"User-Agent": useragent})
+            with urllib.request.urlopen(g, timeout=10) as r:
+                gd = json.loads(r.read().decode() or "{}")
+                results[f"{label}_get"] = f"HTTP {r.status} name={gd.get('name')} ch={gd.get('channel_id')} app={gd.get('application_id')} type={gd.get('type')}"
         except urllib.error.HTTPError as e:
-            results[f"{label}_ping"] = f"HTTP {e.code}: {e.reason}"
+            results[f"{label}_get"] = f"HTTP {e.code}: {e.reason}"
+        try:
+            p = urllib.request.Request(url, data=json.dumps({"content": f"ping {time.time():.0f}"}).encode(),
+                                       headers={"Content-Type": "application/json", "User-Agent": useragent})
+            with urllib.request.urlopen(p, timeout=10) as r:
+                results[f"{label}_post"] = f"HTTP {r.status} ok"
+        except urllib.error.HTTPError as e:
+            body = ""
+            try: body = e.read().decode(errors="replace")[:120]
+            except: pass
+            results[f"{label}_post"] = f"HTTP {e.code}: {body}"
         except Exception as e:
-            results[f"{label}_ping"] = str(e)[:120]
+            results[f"{label}_post"] = str(e)[:120]
     return results
