@@ -237,8 +237,10 @@ def format_track(parsed, session=None, closed=False, logged_hands=None, units="d
 		if parsed.get("cashout") is not None and parsed.get("profit") is None:
 			return f"Session closed - cashed out {fmt_amount(parsed['cashout'], units)}."
 		p = parsed.get("profit", 0)
-		extra = f" Cashed out {fmt_amount(parsed['cashout'], units)}." if parsed.get("cashout") is not None else ""
-		return f"Session closed - {'+' if p >= 0 else ''}{p}.{extra}"
+		psym = "$" if (units or "dollars") == "dollars" else ""
+		psfx = "" if (units or "dollars") == "dollars" else (units or "dollars")
+		sign = "+" if p >= 0 else ""
+		return f"Session closed - {sign}{psym}{p}{psfx}."
 	if logged_hands:
 		out = []
 		for h in logged_hands:
