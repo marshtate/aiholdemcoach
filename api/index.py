@@ -34,6 +34,39 @@ except Exception as exc:
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 USER_AGENT = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
 
+CHAT_DAILY_LIMIT = int(os.environ.get("CHAT_DAILY_LIMIT", "300"))
+CHAT_GLOBAL_DAILY_LIMIT = int(os.environ.get("CHAT_GLOBAL_DAILY_LIMIT", "3000"))
+CHAT_WHITELIST = {e.strip().lower() for e in os.environ.get("CHAT_WHITELIST", "").split(",") if e.strip()}
+USAGE_SENTINEL_GLOBAL = "00000000-0000-0000-0000-000000000000"
+USAGE_SENTINEL_ANON = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+_usage_gate_warned = False
+
+def check_chat_quota(user_email, user_id):
+	global _usage_gate_warned
+	if user_email and user_email.lower() in CHAT_WHITELIST:
+		return None
+	u = user_id or USAGE_SENTINEL_ANON
+	try:
+		res = supabase.rpc("bump_chat_usage", {
+			"p_day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+			"p_user": u,
+			"p_global": USAGE_SENTINEL_GLOBAL,
+		}).execute()
+	except Exception as exc:
+		if not _usage_gate_warned:
+			_usage_gate_warned = True
+			discord_ping(f"Usage gate not installed yet (run schema.sql chat_usage block): {exc}")
+		return None
+	rows = res.data if isinstance(res.data, list) else ([res.data] if res.data else [])
+	row = rows[0] if rows else {}
+	u_count = row.get("u_count") or 0
+	g_count = row.get("g_count") or 0
+	if g_count > CHAT_GLOBAL_DAILY_LIMIT:
+		return "Coach is at capacity for today. Try again tomorrow!"
+	if u_count > CHAT_DAILY_LIMIT:
+		return f"You've used your {CHAT_DAILY_LIMIT} daily coach replies. Your limit resets at midnight - come back tomorrow!"
+	return None
+
 def discord_ping(text):
 	if not DISCORD_WEBHOOK_URL:
 		return
@@ -377,14 +410,19 @@ async def chat_endpoint(req: Request):
     mode = body.get("mode", "coach")
     auth_header = req.headers.get("authorization", "")
     user_id = None
+    user_email = None
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         try:
             resp = supabase.auth.get_user(token)
             if resp and resp.user:
                 user_id = resp.user.id
+                user_email = resp.user.email
         except:
             pass
+    limit_msg = check_chat_quota(user_email, user_id)
+    if limit_msg:
+        return {"reply": limit_msg, "parsed": {}}
     if mode == "recap":
         if not user_id:
             return {"reply": "Sign in to recap a session."}
