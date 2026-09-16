@@ -1562,10 +1562,10 @@ async def import_screenshot(req: Request):
         text = groq_vision_text(b64, prompt, mime)
     except Exception as exc:
         discord_ping(f"screenshot vision: {exc}")
-        return {"error": "Could not read the image. Try a sharper screenshot.", "vision_error": str(exc)[:400]}
+        return {"error": "Could not read the image. Try a sharper screenshot."}
     text = (text or "").strip()
     if not text:
-        return {"error": "Could not read the image. Try a sharper screenshot.", "transcribed": ""}
+        return {"error": "Could not read the image. Try a sharper screenshot."}
     source = str(body.get("source") or "").strip().lower()
     label = str(body.get("label") or "").strip()[:40] or None
     units = str(body.get("units") or ("chips" if source == "offsuit" else "dollars")).lower()
