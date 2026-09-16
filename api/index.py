@@ -1035,6 +1035,244 @@ async def import_session(req: Request):
         discord_ping(f"import session: {exc}")
         return {"error": str(exc)}
 
+ACTION_VERBS = {
+    "fold": "fold", "folds": "fold", "check": "check", "checks": "check",
+    "call": "call", "calls": "call", "limp": "call",
+    "raise": "raise", "raises": "raise", "3-bet": "raise", "3bet": "raise",
+    "open": "raise", "bet": "raise", "bets": "raise", "all-in": "raise", "allin": "raise", "shove": "raise",
+}
+_POS_FULL = {3: "UTG", 4: "UTG+1", 5: "MP", 6: "MP+1", 7: "CO", 8: "HJ", 9: "LJ"}
+_POS_6MAX = {3: "UTG", 4: "MP", 5: "CO"}
+_HH_HEADER = re.compile(r"^\*{3,}.*[Hh]and [Hh]istory.*$|^[^\n]*[Hh]and\s*#\s*\d+.*$")
+
+def _money(x):
+    m = re.search(r"([\d][\d,]{0,9}(?:\.\d{1,2})?)", str(x))
+    return float(m.group(1).replace(",", "")) if m else None
+
+def _nums(s):
+    return [float(v.replace(",", "")) for v in re.findall(r"[\d][\d,]{0,9}(?:\.\d{1,2})?", str(s))]
+
+def _canonical(cards):
+    text = str(cards)
+    parts = re.findall(r"[2-9TJQKA][shdcSHDC]", text)
+    if len(parts) == 2:
+        try:
+            return to_canonical(parts[0][0] + parts[0][1].lower(), parts[1][0] + parts[1][1].lower())
+        except Exception:
+            pass
+    m = re.search(r"\b([2-9TJQKA]{2})([oOsS])?\b", text)
+    if m:
+        c1, c2 = m.group(1)[0], m.group(1)[1]
+        if c1 == c2:
+            return c1 + c2
+        return c1 + c2 + ("s" if (m.group(2) or "").lower() == "s" else "o")
+    return None
+
+def _position_from(rel, n):
+    if rel == 0: return "BTN"
+    if rel == 1: return "SB"
+    if rel == 2: return "BB"
+    if n <= 6: return _POS_6MAX.get(rel, "")
+    return _POS_FULL.get(rel, "")
+
+def _parse_poker_block(blk):
+    hero_m = re.search(r"Dealt to (\S+)", blk)
+    if not hero_m:
+        return {}
+    hero = hero_m.group(1)
+    cards_m = re.search(r"[\[\(]([^\]\)]+)[\]\)]", blk)
+    hand = _canonical(cards_m.group(1) if cards_m else "") or None
+    if not hand:
+        return {}
+    seats = {}
+    for s, nm in re.findall(r"Seat (\d+): ([^(\n]+)", blk):
+        seats[int(s)] = nm.strip()
+    n = max(seats) if seats else 2
+    hero_seat = next((s for s, nm in seats.items() if nm == hero or nm.startswith(hero)), None)
+    btn_m = re.search(r"Seat (\d+) is the button", blk)
+    btn = int(btn_m.group(1)) if btn_m else (n or 2)
+    pos = ""
+    if hero_seat:
+        pos = _position_from((hero_seat - btn) % n, n)
+    hero_lines = [ln.strip() for ln in blk.splitlines() if re.match(r"^\s*" + re.escape(hero) + r"[:\s]", ln)]
+    action = ""
+    contrib = 0.0
+    for ln in hero_lines:
+        low = ln.lower()
+        if not action:
+            for k, v in ACTION_VERBS.items():
+                if k in low:
+                    action = v
+                    break
+        nums = _nums(ln)
+        if not nums:
+            continue
+        if "raise" in low or "all-in" in low or "shove" in low:
+            contrib += nums[-1]
+        elif "call" in low or "bet" in low:
+            contrib += nums[0]
+    won = None
+    col = re.search(r"(?:collected|wins|won)\s+\$?([\d.,]+)", blk)
+    if col:
+        won = _money(col.group(1))
+    if won is None:
+        ret = re.search(r"uncalled bet\s*\(?\$?([\d.,]+)\)?\s*(?:returned|back)?\s*(?:to\s*)?" + re.escape(hero), blk)
+        if ret:
+            won = _money(ret.group(1))
+    if won is None:
+        ret = re.search(re.escape(hero) + r"\s*(?:wins|collected)\s+\$?([\d.,]+)", blk, re.I)
+        if ret:
+            won = _money(ret.group(1))
+    hero_showed = bool(re.search(r"^\s*" + re.escape(hero) + r":\s*shows", blk, re.M))
+    hero_mucked = bool(re.search(r"^\s*" + re.escape(hero) + r":\s*(?:mucked|does(?: n)?['']?t?\s*show)", blk, re.I))
+    opp_collected = bool(re.search(r"(?m)^(?!\s*" + re.escape(hero) + r"\b)[^\n]*?(?:collected|wins)\s+\$?", blk))
+    result, amount = None, None
+    if won is not None:
+        result, amount = "won", round(won, 2)
+    elif hero_showed or hero_mucked or opp_collected:
+        result = "lost"
+        amount = round(contrib, 2) if contrib else None
+    elif action == "fold" and contrib:
+        result, amount = "lost", round(contrib, 2)
+    return {"hand": hand, "position": pos or None, "action": action, "result": result, "amount": amount}
+
+def parse_full_history(text):
+    blocks, cur = [], []
+    for ln in text.splitlines():
+        if _HH_HEADER.match(ln.strip()):
+            if cur:
+                blocks.append("\n".join(cur)); cur = []
+            cur.append(ln)
+        else:
+            cur.append(ln)
+    if cur:
+        blocks.append("\n".join(cur))
+    out = []
+    for b in blocks:
+        h = _parse_poker_block(b)
+        if h.get("hand"):
+            out.append(h)
+    return out
+
+def _extract_hand(line):
+    m = re.search(r"((?:[2-9TJQKA][shdc]){2})", line, re.I)
+    if m:
+        return _canonical(m.group(1))
+    m = re.search(r"\b([2-9TJQKA]{2})([oOsS])?\b", line)
+    if m:
+        return _canonical(m.group(1) + (m.group(2) or ""))
+    return None
+
+def _parse_simple_hand_object(h):
+    hand = _canonical(str(h.get("hand") or h.get("cards") or "")) or _extract_hand(str(h.get("hand") or ""))
+    if not hand:
+        return {}
+    action = str(h.get("action") or h.get("player_action") or "").strip().lower()
+    action = ACTION_VERBS.get(action, "") or ""
+    result = str(h.get("result") or "").strip().lower()
+    result = result if result in ("won", "lost") else None
+    amount = h.get("amount")
+    try:
+        amount = round(float(amount), 2) if amount not in (None, "") else None
+    except (TypeError, ValueError):
+        amount = None
+    pos = str(h.get("position") or "").strip().upper()
+    return {"hand": hand, "position": pos or None, "action": action, "result": result, "amount": amount}
+
+def parse_simple_lines(text):
+    out = []
+    _SIMPLE_POS = re.compile(r"\b(BTN|BU|SB|BB|UTG\+1|UTG\+2|UTG|MP\+1|MP\+2|MP|CO|HJ|LJ)\b", re.I)
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        hand = _extract_hand(ln)
+        if not hand:
+            continue
+        low = ln.lower()
+        action = ""
+        for k, v in ACTION_VERBS.items():
+            if k in low:
+                action = v
+                break
+        result = "won" if re.search(r"\b(won|wins|win|profit)\b", low) else ("lost" if re.search(r"\b(lost|lose|loss)\b", low) else None)
+        amount = None
+        nums = _nums(ln)
+        if nums:
+            amount = round(nums[0], 2) if result else None
+        pos_m = _SIMPLE_POS.search(ln)
+        pos = "BTN" if (pos_m and pos_m.group(1).upper() == "BU") else (pos_m.group(1).upper() if pos_m else "")
+        out.append({"hand": hand, "position": pos or None, "action": action, "result": result, "amount": amount})
+    return out
+
+def parse_hand_text(text, source=""):
+    text = (text or "").strip()
+    if "Hand #" in text or "Hand History" in text or "Dealt to" in text or source in ("pokerstars", "partypoker", "ipoker", "pokernow"):
+        full = parse_full_history(text)
+        if full:
+            return full
+    return parse_simple_lines(text)
+
+@app.post("/api/import/hands")
+async def import_hands(req: Request):
+    uid, email = auth_identity(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    ent = entitlement(uid, email)
+    if not (ent.get("limits") or {}).get("import"):
+        return {"error": "Importing hand histories is a Pro feature. Upgrade to unlock it.", "paywall": "import"}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    source = str(body.get("source") or "").strip().lower()
+    label = str(body.get("label") or "").strip()[:40] or None
+    units = str(body.get("units") or ("chips" if source == "offsuit" else "dollars")).lower()
+    if units not in ("dollars", "bb", "chips"):
+        units = "dollars"
+    text = str(body.get("text") or "").strip()
+    raw = body.get("hands")
+    hands = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                h = _parse_simple_hand_object(item)
+                if h.get("hand"):
+                    hands.append(h)
+    if not hands and text:
+        hands = parse_hand_text(text, source)
+    if not hands:
+        return {"error": "Couldn't find any hands in what you pasted. Try one hand per line like: AKo BTN raise won 25"}
+    if len(hands) > 500:
+        return {"error": "That's more than 500 hands. Import in smaller batches."}
+    profit = 0.0
+    resolved = 0
+    for h in hands:
+        if h.get("result") in ("won", "lost") and h.get("amount") is not None:
+            profit += h["amount"] if h["result"] == "won" else -h["amount"]
+            resolved += 1
+    profit = round(profit, 2) if resolved else None
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        sid = supabase.table("sessions").insert({
+            "user_id": uid, "units": units, "status": "closed", "label": label,
+            "profit": profit, "cashout": None, "created_at": now, "closed_at": now
+        }).execute().data[0]["id"]
+        rows = []
+        for h in hands:
+            rows.append({
+                "user_id": uid, "session_id": sid, "hand": h["hand"],
+                "position": h.get("position"), "player_action": h.get("action"),
+                "result": h.get("result"), "amount": h.get("amount"),
+                "input": text[:1000] if text else f"Imported {source or 'hand'} history",
+                "reply": f"Imported from {source or 'hand history'}.",
+            })
+        supabase.table("messages").insert(rows).execute()
+        return {"ok": True, "session_id": sid, "hands": len(hands), "profit": profit, "units": units, "resolved": resolved, "source": source}
+    except Exception as exc:
+        discord_ping(f"import hands: {exc}")
+        return {"error": str(exc)}
+
 DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
