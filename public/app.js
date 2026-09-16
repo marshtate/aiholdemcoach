@@ -807,7 +807,7 @@ document.getElementById('home-view').insertAdjacentHTML('afterbegin', card);
 }
 async function loadHistory() {
 const el = document.getElementById('history-view');
-if (!cachedHistory || cachedHistory.length === 0) viewSkeleton('history-view', ['h-12', 'h-10', 'h-10', 'h-10', 'h-24']);
+viewSkeleton('history-view', ['h-12', 'h-10', 'h-10', 'h-10', 'h-24']);
 const entries = await fetchHistory();
 if (entries.length === 0) {
 el.innerHTML = `<div class="text-center py-16 space-y-4">
@@ -921,7 +921,7 @@ loadHistory();
 }
 
 async function loadStats() {
-if (!cachedHistory || cachedHistory.length === 0) viewSkeleton('stats-view', ['h-20', 'h-16', 'h-16', 'h-40', 'h-10']);
+viewSkeleton('stats-view', ['h-20', 'h-16', 'h-16', 'h-40', 'h-10']);
 const entries = await fetchHistory();
 const sessions = await fetchSessions();
 const el = document.getElementById('stats-view');
