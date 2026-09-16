@@ -79,11 +79,11 @@ USAGE_SENTINEL_ANON = "ffffffff-ffff-ffff-ffff-ffffffffffff"
 _usage_gate_warned = False
 
 PLAN_LIMITS = {
-    "free": {"coach": FREE_COACH_LIMIT, "track": FREE_TRACK_LIMIT, "history_days": FREE_HISTORY_DAYS, "recap": False, "import": False},
-    "pro": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
-    "premium": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
-    "legacy": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
-    "admin": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "import": True},
+    "free": {"coach": FREE_COACH_LIMIT, "track": FREE_TRACK_LIMIT, "history_days": FREE_HISTORY_DAYS, "recap": True, "recap_daily": 1, "import": False},
+    "pro": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "recap_daily": 0, "import": True},
+    "premium": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "recap_daily": 0, "import": True},
+    "legacy": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "recap_daily": 0, "import": True},
+    "admin": {"coach": 0, "track": 0, "history_days": 0, "recap": True, "recap_daily": 0, "import": True},
 }
 
 def check_chat_quota(user_email, user_id, mode="chat", ent=None):
@@ -100,12 +100,12 @@ def check_chat_quota(user_email, user_id, mode="chat", ent=None):
 			"p_day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
 			"p_user": u,
 			"p_global": USAGE_SENTINEL_GLOBAL,
-			"p_mode": "chat" if mode not in ("coach", "track") else mode,
+			"p_mode": "chat" if mode not in ("coach", "track", "recap") else mode,
 		}).execute()
 	except Exception as exc:
 		if not _usage_gate_warned:
 			_usage_gate_warned = True
-			discord_ping(f"Usage gate not installed (run schema.sql v3 block): {exc}")
+			discord_ping(f"Usage gate not installed (run schema.sql v4 block): {exc}")
 		return None
 	rows = res.data if isinstance(res.data, list) else ([res.data] if res.data else [])
 	row = rows[0] if rows else {}
@@ -115,6 +115,9 @@ def check_chat_quota(user_email, user_id, mode="chat", ent=None):
 	if not ent or ent.get("tier") != "free":
 		return None
 	limits = ent.get("limits") or {}
+	if mode == "recap" and limits.get("recap_daily"):
+		if (row.get("u_recap") or 0) > limits["recap_daily"]:
+			return f"You've used your {limits['recap_daily']} free recap{'s' if limits['recap_daily'] != 1 else ''} for today. Upgrade to Pro for unlimited recaps, or come back tomorrow!"
 	if mode == "coach" and limits.get("coach"):
 		if (row.get("u_coach") or 0) > limits["coach"]:
 			return f"You've used your {limits['coach']} daily coach chats on the Free plan. Upgrade to Pro for unlimited coaching, recap, and import."
@@ -135,7 +138,7 @@ def _parse_ts(value):
 
 def entitlement(user_id, user_email=None):
 	if user_id and user_email and user_email.lower() in ADMIN_EMAILS:
-		return {"tier": "admin", "plan": "admin", "limits": tier_limits("admin")}
+		return {"tier": "admin", "plan": "admin", "limits": tier_limits("admin"), "trial": {"active": False, "days_left": 0, "ended": False}}
 	sub = None
 	if user_id:
 		try:
@@ -154,8 +157,8 @@ def entitlement(user_id, user_email=None):
 				if pe is not None and pe < datetime.now(timezone.utc) - timedelta(days=1):
 					expired = True
 			if not expired:
-				return {"tier": stripe_tier, "plan": stripe_tier, "limits": tier_limits(stripe_tier), "subscription": sub}
-		return {"tier": "free", "plan": "free", "limits": tier_limits("free"), "subscription": sub}
+				return {"tier": stripe_tier, "plan": stripe_tier, "limits": tier_limits(stripe_tier), "subscription": sub, "trial": {"active": False, "days_left": 0, "ended": False}}
+		return {"tier": "free", "plan": "free", "limits": tier_limits("free"), "subscription": sub, "trial": {"active": False, "days_left": 0, "ended": False}}
 	created_at = None
 	if user_id:
 		try:
@@ -177,8 +180,8 @@ def entitlement(user_id, user_email=None):
 		if ts is not None:
 			age = (datetime.now(timezone.utc) - ts).days
 		if age is not None and age < TRIAL_DAYS:
-			return {"tier": "pro", "plan": "trial", "limits": tier_limits("pro")}
-	return {"tier": "free", "plan": "free", "limits": tier_limits("free")}
+			return {"tier": "pro", "plan": "trial", "limits": tier_limits("pro"), "trial": {"active": True, "days_left": max(0, TRIAL_DAYS - age), "ended": False}}
+	return {"tier": "free", "plan": "free", "limits": tier_limits("free"), "trial": {"active": False, "days_left": 0, "ended": created_at is not None and age is not None and age >= TRIAL_DAYS}}
 
 def tier_limits(tier):
 	return PLAN_LIMITS.get(tier, PLAN_LIMITS["free"])
@@ -638,12 +641,12 @@ async def chat_endpoint(req: Request):
             return {"reply": "Recap is a Pro feature. Upgrade to unlock it and re-analyze any past session in one tap.", "parsed": {}, "paywall": "recap"}
         limit_msg = check_chat_quota(user_email, user_id, "recap", ent)
         if limit_msg:
-            return {"reply": limit_msg, "parsed": {}}
+            return {"reply": limit_msg, "parsed": {}, "quota": "recap", "bullets": ["Where you bled the most chips", "Spots you over-called or over-folded", "Win rate by position", "Your 3 biggest missed opportunities"]}
         reply, rid = recap_turn(user_input, user_id, body.get("session_id"))
         return {"reply": reply, "parsed": {}, "recap_session_id": rid}
     limit_msg = check_chat_quota(user_email, user_id, mode if mode in ("coach", "track") else "chat", ent)
     if limit_msg:
-        return {"reply": limit_msg, "parsed": {}}
+        return {"reply": limit_msg, "parsed": {}, "quota": mode if mode in ("coach", "track") else "chat"}
     reply, parsed, session, tool_called, closed, logged_hands = run_pipeline(user_input, mode, user_id, body.get("units", "dollars"))
     if user_id and tool_called and not closed and not parsed.get("buyin"):
         batch = logged_hands if logged_hands else [parsed]
@@ -1588,16 +1591,16 @@ async def usage_endpoint(req: Request):
     if not uid:
         return {"error": "unauthorized"}
     ent = entitlement(uid, email)
-    counts = {"chats": 0, "coach": 0, "track": 0}
+    counts = {"chats": 0, "coach": 0, "track": 0, "recap": 0}
     try:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        r = supabase.table("chat_usage").select("chats, coach, track").eq("day", today).eq("user_id", uid).execute()
+        r = supabase.table("chat_usage").select("chats, coach, track, recap").eq("day", today).eq("user_id", uid).execute()
         if r.data and r.data[0]:
             row = r.data[0]
-            counts = {"chats": row.get("chats") or 0, "coach": row.get("coach") or 0, "track": row.get("track") or 0}
+            counts = {"chats": row.get("chats") or 0, "coach": row.get("coach") or 0, "track": row.get("track") or 0, "recap": row.get("recap") or 0}
     except Exception:
         pass
-    return {"tier": ent["tier"], "plan": ent["plan"], "limits": ent["limits"], "counts": counts, "trial_days": TRIAL_DAYS}
+    return {"tier": ent["tier"], "plan": ent["plan"], "limits": ent["limits"], "counts": counts, "trial_days": TRIAL_DAYS, "trial": ent.get("trial") or {"active": False, "days_left": 0, "ended": False}}
 
 @app.post("/api/stripe/checkout")
 async def stripe_checkout(req: Request):
