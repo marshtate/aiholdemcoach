@@ -174,6 +174,25 @@ status.textContent = (res && res.error) || 'Could not send right now. Try again 
 status.className = 'text-xs text-red-400';
 }
 }
+function togglePasteForm() { const f = document.getElementById('paste-form'); if (f) f.classList.toggle('hidden'); }
+function onPasteSourceChange() { const s = document.getElementById('paste-source'); const u = document.getElementById('paste-units'); if (s && u && s.value === 'offsuit') u.value = 'chips'; }
+async function submitPasteImport() {
+const el = document.getElementById('paste-status');
+const text = (document.getElementById('paste-text').value || '').trim();
+if (!text) { el.textContent = 'Paste some hands first.'; return; }
+el.textContent = 'Importing...';
+try {
+const res = await authedFetch('/api/import/hands', { method: 'POST', body: JSON.stringify({ text: text, source: document.getElementById('paste-source').value, units: document.getElementById('paste-units').value, label: (document.getElementById('paste-label').value || '').trim() }) });
+if (res && res.ok) {
+el.textContent = 'Imported ' + res.hands + ' hands' + (res.profit != null ? ' (net ' + (res.profit >= 0 ? '+' : '') + res.profit + ')' : '') + '.';
+cachedHistory = null;
+loadHistory();
+document.getElementById('paste-text').value = '';
+} else {
+el.textContent = (res && res.error) || 'Could not import right now.';
+}
+} catch (e) { el.textContent = 'Could not import right now.'; }
+}
 async function openCheckout(plan) {
 if (plan === 'premium' || plan === 'pro') {
 const res = await authedFetch('/api/stripe/checkout', { method: 'POST', body: JSON.stringify({ plan: plan }) });
