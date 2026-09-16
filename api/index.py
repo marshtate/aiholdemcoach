@@ -735,6 +735,74 @@ def performance_insight_turn(user_input, user_id, history=None):
 	except Exception as e:
 		return f"AI error: {str(e)}"
 
+def drill_context(user_id):
+	lines = []
+	try:
+		hres = supabase.table("messages").select("session_id, hand, position, player_action, result, amount, created_at").eq("user_id", user_id).order("created_at", desc=True).limit(200).execute()
+	except Exception as exc:
+		discord_ping(f"drill hands: {exc}")
+		hres = None
+	hands = [h for h in ((hres.data or []) if hres else []) if h.get("hand")]
+	recent = hands[:12]
+	if recent:
+		rl = []
+		for h in recent[:12]:
+			parts = [h.get("hand") or "?", h.get("position") or "", h.get("player_action") or "",
+			         "won" if str(h.get("result") or "").lower() in ("won", "win", "w") else ("lost" if h.get("result") else ""),
+			         f"{h.get('amount')}" if h.get("amount") is not None else ""]
+			rl.append(" ".join(x for x in parts if x))
+		lines.append("Recent hands: " + "; ".join(rl))
+	losing = [h for h in hands if str(h.get("result") or "").lower() in ("lost", "lose", "l") and h.get("amount") is not None]
+	losing.sort(key=lambda h: abs(h.get("amount") or 0), reverse=True)
+	if losing:
+		ll = []
+		for h in losing[:5]:
+			parts = [h.get("hand") or "?", h.get("position") or "", h.get("player_action") or "", f"lost {h.get('amount')}"]
+			ll.append(" ".join(x for x in parts if x))
+		lines.append("Biggest losses: " + "; ".join(ll))
+	actions = {}
+	tiers = {}
+	fold = 0
+	total = 0
+	for h in hands:
+		a = (h.get("player_action") or "").lower()
+		if a:
+			actions[a] = actions.get(a, 0) + 1
+		if a == "fold":
+			fold += 1
+		total += 1
+		t = (h.get("tier") or "").lower()
+		if t:
+			tiers[t] = tiers.get(t, 0) + 1
+	if actions:
+		lines.append("Action mix: " + ", ".join(f"{k} {v}" for k, v in sorted(actions.items(), key=lambda x: -x[1])) + ".")
+	if tiers:
+		lines.append("Hand tier mix: " + ", ".join(f"{k} {v}" for k, v in sorted(tiers.items(), key=lambda x: -x[1])) + ".")
+	if total:
+		lines.append(f"Fold rate: {round(fold / total * 100)}% across {total} logged hands.")
+	if not lines:
+		lines.append("No logged hands yet - use general poker fundamentals drills.")
+	return "\n".join(lines)
+
+def drill_turn(user_input, user_id, history=None):
+	ctx = drill_context(user_id)
+	system = ("You are a poker training coach that drills the player on their OWN tendencies, using the hand data below. "
+	          "Ask ONE hand-scenario question at a time: give the situation (position, hole cards, maybe a board) - reuse their real hands "
+	          "and leak patterns whenever you can. Then STOP and wait for their answer. After they answer, give short honest feedback "
+	          "(correct play vs their leak, and why) in 2-3 sentences, then ask the NEXT question. "
+	          "Start your FIRST message by naming their clearest leak from the data and leading with a drill on it. "
+	          "Keep each scenario under ~60 words. Never reveal the answer before they answer. Be encouraging but honest, like a friend coaching from the rail.\n\n"
+	          f"PLAYER DATA\n{ctx}")
+	msgs = [{"role": "system", "content": system}]
+	if history:
+		msgs.extend([{"role": h.get("role") if h.get("role") in ("user", "assistant") else "user", "content": h.get("content", "")} for h in history[-16:]])
+	msgs.append({"role": "user", "content": user_input})
+	try:
+		resp = groq_ask(msgs)
+		return resp.choices[0].message.content or "Could not build a drill right now."
+	except Exception as e:
+		return f"AI error: {str(e)}"
+
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
     if not startup_ok:
@@ -778,6 +846,14 @@ async def chat_endpoint(req: Request):
         if limit_msg:
             return {"reply": limit_msg, "parsed": {}, "quota": "review", "bullets": ["Are you more profitable with fewer or more hands per night", "Biggest wins and worst leaks by the numbers", "Where your value leaks: sizing, calls, folds, positions", "Session trends and tilt patterns"]}
         reply = performance_insight_turn(user_input, user_id, body.get("history"))
+        return {"reply": reply, "parsed": {}}
+    if mode == "drill":
+        if not user_id:
+            return {"reply": "Sign in to train your leaks."}
+        limit_msg = check_chat_quota(user_email, user_id, "coach", ent)
+        if limit_msg:
+            return {"reply": limit_msg, "parsed": {}, "quota": "drill", "bullets": ["Hand drills ripped from your own game", "Instant feedback on each decision you make", "Focuses your biggest, costliest leaks"]}
+        reply = drill_turn(user_input, user_id, body.get("history"))
         return {"reply": reply, "parsed": {}}
     limit_msg = check_chat_quota(user_email, user_id, mode if mode in ("coach", "track", "session") else "chat", ent)
     if limit_msg:
@@ -1903,11 +1979,20 @@ async def leaderboard_endpoint(req: Request):
     user_id = auth_user_id(req)
     if not user_id:
         return {"error": "unauthorized"}
+    rng = (req.query_params.get("range") or "all").lower()
+    since = None
+    now = datetime.now(timezone.utc)
+    if rng == "week":
+        since = (now - timedelta(days=7)).isoformat()
+    elif rng == "month":
+        since = (now - timedelta(days=30)).isoformat()
+    elif rng == "ytd":
+        since = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
     me = ensure_profile(user_id)
     names = usernames_for([user_id] + my_friend_ids(user_id))
     rows = []
     for uid in [user_id] + my_friend_ids(user_id):
-        stats = session_stats(uid)
+        stats = session_stats(uid, since=since)
         if stats["nights"] == 0:
             continue
         rows.append({"username": names.get(uid, "?"), "you": uid == user_id, **stats})
