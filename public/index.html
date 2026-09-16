@@ -428,7 +428,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <span>Apply to bankroll</span>
 </label>
 <p id="import-bankroll-hint" class="hidden text-[10px] text-gray-600">Bankroll only applies to dollar sessions.</p>
-<button onclick="addPastSession()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2.5 rounded-lg transition">Add session</button>
+<button id="import-submit" onclick="addPastSession()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Add session</button>
 <p id="import-status" class="text-xs text-gray-400"></p>
 </div>
 </div>
@@ -464,7 +464,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <input id="paste-label" type="text" placeholder="e.g. Stars session 9/12" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600">
 </div>
 <textarea id="paste-text" rows="5" placeholder="Paste the exported hand history, or one hand per line like:&#10;AKo BTN raise won 25&#10;JJ BB call lost 10" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600"></textarea>
-<button onclick="submitPasteImport()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2.5 rounded-lg transition">Import hands</button>
+<button id="paste-submit" onclick="submitPasteImport()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Import hands</button>
 <p id="paste-status" class="text-xs text-gray-400"></p>
 </div>
 </div>
