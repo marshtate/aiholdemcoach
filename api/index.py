@@ -2206,6 +2206,313 @@ async def weekly_endpoint(req: Request):
     wk["leak"] = leak
     return {"ok": True, "week_start": week_start.isoformat(), "week": wk, "prev": {"nights": pv["nights"], "profit": pv["profit"]}}
 
+def _game_rows(req_user, game_id):
+    try:
+        g = supabase.table("games").select("*").eq("id", game_id).execute()
+    except Exception:
+        return None
+    game = (g.data or [{}])[0] if (g.data or []) else None
+    if not game:
+        return None
+    if game.get("user_id") != req_user:
+        try:
+            mine = supabase.table("game_players").select("user_id").eq("game_id", game_id).eq("user_id", req_user).execute()
+            if not (mine.data or []):
+                return None
+        except Exception:
+            return None
+    return game
+
+def _game_players_rows(game_id):
+    try:
+        res = supabase.table("game_players").select("user_id, status, buyin, cashout, profit, created_at").eq("game_id", game_id).execute()
+        return list(res.data or [])
+    except Exception:
+        return []
+
+def _game_view(req_user, game):
+    gid = game["id"]
+    members = _game_players_rows(gid)
+    names = usernames_for([game.get("user_id")] + [r["user_id"] for r in members])
+    players = []
+    for r in members:
+        players.append({
+            "user_id": r["user_id"],
+            "username": names.get(r["user_id"], "?"),
+            "status": r.get("status"),
+            "buyin": round(float(r.get("buyin") or 0), 2),
+            "cashout": round(float(r["cashout"]), 2) if r.get("cashout") is not None else None,
+            "profit": round(float(r["profit"]), 2) if r.get("profit") is not None else None,
+            "you": r["user_id"] == req_user,
+        })
+    ranked = [p for p in players if p["profit"] is not None and p["status"] == "accepted"]
+    ranked.sort(key=lambda p: p["profit"], reverse=True)
+    for i, p in enumerate(ranked):
+        p["rank"] = i + 1
+    sorted_players = (ranked
+        + [p for p in players if p["profit"] is None and p["status"] == "accepted"]
+        + [p for p in players if p["profit"] is None and p["status"] != "accepted"])
+    return {
+        "id": gid,
+        "name": game.get("name"),
+        "happened_at": game.get("happened_at"),
+        "status": game.get("status"),
+        "created_at": game.get("created_at"),
+        "host": {"user_id": game.get("user_id"), "username": names.get(game.get("user_id"), "?")},
+        "players": sorted_players,
+        "ranked": ranked,
+        "you": req_user,
+    }
+
+@app.get("/api/games")
+async def games_list_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    my_ids = None
+    try:
+        owned = supabase.table("games").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(20).execute()
+        owned_rows = list(owned.data or [])
+    except Exception:
+        owned_rows = []
+    try:
+        mp = supabase.table("game_players").select("game_id").eq("user_id", user_id).execute()
+        my_ids = [r["game_id"] for r in (mp.data or [])]
+    except Exception:
+        my_ids = []
+    joined_rows = []
+    if my_ids:
+        try:
+            j = supabase.table("games").select("*").in_("id", my_ids).order("created_at", desc=True).limit(20).execute()
+            joined_rows = list(j.data or [])
+        except Exception:
+            joined_rows = []
+    view = {}
+    for g in owned_rows + joined_rows:
+        view[g["id"]] = g
+    out = []
+    for g in sorted(view.values(), key=lambda g: (g.get("created_at") or ""), reverse=True):
+        out.append(_game_view(user_id, g))
+    return {"ok": True, "games": out}
+
+@app.post("/api/games")
+async def games_create_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    name = str(body.get("name") or "").strip()[:40] or "Game night"
+    happened_at = str(body.get("happened_at") or "").strip() or None
+    invites = body.get("invites") or []
+    if not isinstance(invites, list):
+        invites = []
+    invites = [str(u).strip().lower() for u in invites][:20]
+    friends = my_friend_ids(user_id)
+    names = usernames_for(friends)
+    name_to_id = {}
+    for fid in friends:
+        n = names.get(fid)
+        if n and n.strip().lower() not in name_to_id:
+            name_to_id[n.strip().lower()] = fid
+    try:
+        g = supabase.table("games").insert({"user_id": user_id, "name": name, "happened_at": happened_at}).execute()
+        gid = g.data[0]["id"]
+        supabase.table("game_players").insert({"game_id": gid, "user_id": user_id, "status": "accepted"}).execute()
+        rows = []
+        for uname in invites:
+            fid = name_to_id.get(uname)
+            if fid == user_id:
+                continue
+            if fid:
+                rows.append({"game_id": gid, "user_id": fid, "status": "pending"})
+        if rows:
+            supabase.table("game_players").insert(rows).execute()
+    except Exception as exc:
+        return {"error": str(exc)}
+    return _game_view(user_id, {"id": gid, "name": name, "happened_at": happened_at, "status": "open", "created_at": None, "user_id": user_id})
+
+@app.get("/api/games/{game_id}")
+async def games_detail_endpoint(req: Request, game_id: str):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    game = _game_rows(user_id, game_id)
+    if not game:
+        return {"error": "not found"}
+    return _game_view(user_id, game)
+
+@app.post("/api/games/{game_id}/invite")
+async def games_invite_endpoint(req: Request, game_id: str):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    game = _game_rows(user_id, game_id)
+    if not game:
+        return {"error": "not found"}
+    if game.get("user_id") != user_id:
+        return {"error": "Only the host can invite."}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    username = str(body.get("username") or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_]{3,20}", username):
+        return {"error": "Enter a valid username."}
+    friends = my_friend_ids(user_id)
+    target = None
+    nm = usernames_for(friends)
+    for fid in friends:
+        if nm.get(fid) and nm[fid].strip().lower() == username:
+            target = fid
+            break
+    if not target:
+        return {"error": "You can only invite accepted friends."}
+    if target == user_id:
+        return {"error": "You're the host."}
+    try:
+        rows = supabase.table("game_players").select("id").eq("game_id", game_id).eq("user_id", target).execute()
+    except Exception:
+        rows = None
+    if rows and rows.data:
+        try:
+            supabase.table("game_players").update({"status": "pending", "updated_at": datetime.now(timezone.utc).isoformat()}).eq("game_id", game_id).eq("user_id", target).execute()
+        except Exception as exc:
+            return {"error": str(exc)}
+    else:
+        try:
+            supabase.table("game_players").insert({"game_id": game_id, "user_id": target, "status": "pending"}).execute()
+        except Exception as exc:
+            return {"error": str(exc)}
+    return {"ok": True}
+
+@app.post("/api/games/{game_id}/join")
+async def games_join_endpoint(req: Request, game_id: str):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    game = _game_rows(user_id, game_id)
+    if not game:
+        return {"error": "not found"}
+    if game.get("status") != "open":
+        return {"error": "That game night is over."}
+    if game.get("user_id") == user_id:
+        return {"error": "You're the host."}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    action = str(body.get("action") or "join").lower()
+    if action not in ("join", "decline"):
+        return {"error": "bad request"}
+    try:
+        rows = supabase.table("game_players").select("id").eq("game_id", game_id).eq("user_id", user_id).execute()
+    except Exception:
+        rows = None
+    status = "accepted" if action == "join" else "declined"
+    try:
+        if rows and rows.data:
+            supabase.table("game_players").update({"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("game_id", game_id).eq("user_id", user_id).execute()
+        else:
+            supabase.table("game_players").insert({"game_id": game_id, "user_id": user_id, "status": status}).execute()
+    except Exception as exc:
+        return {"error": str(exc)}
+    return {"ok": True}
+
+@app.post("/api/games/{game_id}/result")
+async def games_result_endpoint(req: Request, game_id: str):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    game = _game_rows(user_id, game_id)
+    if not game:
+        return {"error": "not found"}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    target = str(body.get("user_id") or user_id)
+    if target != user_id and game.get("user_id") != user_id:
+        return {"error": "Only the host can add another player's result."}
+    try:
+        rows = supabase.table("game_players").select("id").eq("game_id", game_id).eq("user_id", target).execute()
+    except Exception:
+        rows = None
+    if not (rows and rows.data):
+        return {"error": "That player isn't on this game."}
+    try:
+        buyin = round(float(body.get("buyin") or 0), 2)
+    except (TypeError, ValueError):
+        return {"error": "Buy-in must be a number."}
+    if buyin < 0:
+        return {"error": "Buy-in can't be negative."}
+    profit = body.get("profit")
+    cashout = body.get("cashout")
+    if profit is not None:
+        try:
+            profit = round(float(profit), 2)
+        except (TypeError, ValueError):
+            return {"error": "Enter a valid profit figure."}
+    elif cashout is not None:
+        try:
+            cashout = round(float(cashout), 2)
+            if cashout < 0:
+                return {"error": "Cash-out can't be negative."}
+        except (TypeError, ValueError):
+            return {"error": "Enter a valid cash-out amount."}
+        profit = round(cashout - buyin, 2)
+    else:
+        return {"error": "Enter a cash-out or a net profit."}
+    try:
+        supabase.table("game_players").update({
+            "buyin": buyin, "cashout": cashout if profit is not None and body.get("profit") is None else cashout,
+            "profit": profit, "updated_at": datetime.now(timezone.utc).isoformat()
+        }).eq("game_id", game_id).eq("user_id", target).execute()
+    except Exception as exc:
+        return {"error": str(exc)}
+    return {"ok": True}
+
+@app.post("/api/games/{game_id}/remove")
+async def games_remove_endpoint(req: Request, game_id: str):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    game = _game_rows(user_id, game_id)
+    if not game:
+        return {"error": "not found"}
+    if game.get("user_id") != user_id:
+        return {"error": "Only the host can remove players."}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    target = str(body.get("user_id") or "")
+    if target == user_id:
+        return {"error": "You can't remove yourself."}
+    try:
+        supabase.table("game_players").delete().eq("game_id", game_id).eq("user_id", target).execute()
+    except Exception as exc:
+        return {"error": str(exc)}
+    return {"ok": True}
+
+@app.post("/api/games/{game_id}/close")
+async def games_close_endpoint(req: Request, game_id: str):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    game = _game_rows(user_id, game_id)
+    if not game:
+        return {"error": "not found"}
+    if game.get("user_id") != user_id:
+        return {"error": "Only the host can close the night."}
+    try:
+        supabase.table("games").update({"status": "closed", "closed_at": datetime.now(timezone.utc).isoformat()}).eq("id", game_id).execute()
+    except Exception as exc:
+        return {"error": str(exc)}
+    return {"ok": True}
+
 @app.post("/api/username")
 async def username_endpoint(req: Request):
     user_id = auth_user_id(req)
