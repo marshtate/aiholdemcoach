@@ -180,7 +180,68 @@ status.className = 'text-xs text-red-400';
 }
 }
 function togglePasteForm() { const f = document.getElementById('paste-form'); if (f) f.classList.toggle('hidden'); }
+function toggleShotForm() { const f = document.getElementById('shot-form'); if (f) f.classList.toggle('hidden'); }
 function onPasteSourceChange() { const s = document.getElementById('paste-source'); const u = document.getElementById('paste-units'); if (s && u && s.value === 'offsuit') u.value = 'chips'; }
+let __shotData = null;
+function setupShotInput() {
+const input = document.getElementById('shot-file');
+if (!input || input.dataset.bound) return;
+input.dataset.bound = '1';
+input.addEventListener('change', async () => {
+const file = input.files && input.files[0];
+const nameEl = document.getElementById('shot-filename');
+const statusEl = document.getElementById('shot-status');
+if (!file) return;
+if (!file.type.startsWith('image/')) { statusEl.textContent = 'That is not an image file.'; __shotData = null; return; }
+if (file.size > 15 * 1024 * 1024) { statusEl.textContent = 'Image is over 15 MB - pick a smaller one.'; __shotData = null; return; }
+statusEl.textContent = 'Reading image...';
+try {
+__shotData = await downscaleImage(file, 1280);
+nameEl.textContent = file.name;
+statusEl.textContent = '';
+} catch (e) { statusEl.textContent = 'Could not read that image.'; __shotData = null; }
+});
+}
+function downscaleImage(file, maxDim) {
+return new Promise((resolve, reject) => {
+const url = URL.createObjectURL(file);
+const img = new Image();
+img.onload = () => {
+URL.revokeObjectURL(url);
+let w = img.width, h = img.height;
+const m = Math.max(w, h);
+if (m > maxDim) { const s = maxDim / m; w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s)); }
+const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+cv.getContext('2d').drawImage(img, 0, 0, w, h);
+resolve(cv.toDataURL('image/jpeg', 0.7));
+};
+img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+img.src = url;
+});
+}
+async function submitShotImport() {
+const statusEl = document.getElementById('shot-status');
+const btn = document.getElementById('shot-submit');
+if (!__shotData) { statusEl.textContent = 'Choose a screenshot first.'; return; }
+btn.disabled = true;
+statusEl.textContent = 'Reading image...';
+try {
+const res = await authedFetch('/api/import/screenshot', { method: 'POST', body: JSON.stringify({ image: __shotData, source: document.getElementById('shot-source').value, units: document.getElementById('shot-units').value, label: (document.getElementById('shot-label').value || '').trim() }) });
+if (res && res.ok) {
+if (res.summary) statusEl.textContent = 'Added the session from your photo (net ' + (res.profit >= 0 ? '+' : '') + res.profit + ').';
+else statusEl.textContent = 'Imported ' + res.hands + ' hands' + (res.profit != null ? ' (net ' + (res.profit >= 0 ? '+' : '') + res.profit + ')' : '') + '.';
+cachedHistory = null;
+loadHistory();
+__shotData = null;
+document.getElementById('shot-file').value = '';
+document.getElementById('shot-filename').textContent = '';
+document.getElementById('shot-label').value = '';
+} else {
+statusEl.textContent = (res && res.error) || 'Could not import right now.';
+}
+} catch (e) { statusEl.textContent = 'Could not import right now.'; }
+finally { btn.disabled = false; }
+}
 async function submitPasteImport() {
 const el = document.getElementById('paste-status');
 const btn = document.getElementById('paste-submit');
@@ -1320,6 +1381,7 @@ function hideNav() { nav.classList.add('hidden'); kbFooter.classList.add('kb-ope
 function showNav() { nav.classList.remove('hidden'); kbFooter.classList.remove('kb-open'); }
 kbInput.addEventListener('focus', hideNav);
 kbInput.addEventListener('blur', function() { setTimeout(showNav, 250); });
+setupShotInput();
 
 async function authedFetch(path, opts) {
 const { data: { session } } = await sb.auth.getSession();
