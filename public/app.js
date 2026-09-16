@@ -513,7 +513,7 @@ refreshSessionBanner();
 }
 function renderQuickChips() {
 const chips = document.getElementById('quick-chips');
-if (recapActive || reviewActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
+if (recapActive || reviewActive || drillActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
 if (currentMode !== 'track' && currentMode !== 'session') { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
 const mk = (amt) => currentUnits === 'dollars' ? '$' + amt.toFixed(2) : (currentUnits === 'bb' ? amt.toFixed(2) + 'bb' : amt + ' chips');
 let defs;
@@ -641,7 +641,7 @@ chatbox.scrollTop = chatbox.scrollHeight;
 });
 async function refreshSessionBanner() {
 const banner = document.getElementById('session-banner');
-if (!banner || recapActive || reviewActive) return;
+if (!banner || recapActive || reviewActive || drillActive) return;
 if (currentMode !== 'track' && currentMode !== 'session') { banner.classList.add('hidden'); return; }
 const sessions = await fetchSessions();
 const open = sessions.find(s => s.status === 'open');
