@@ -10,6 +10,8 @@ const modeToggle = document.getElementById('mode-toggle-header');
 let currentMode = localStorage.getItem('aihc_last_mode') || 'coach';
 let cachedHistory = null;
 let recapActive = false;
+let reviewActive = false;
+let reviewHistory = [];
 let recapSessionId = null;
 let __usage = null;
 let __dismissedGoPro = localStorage.getItem('aihc_gopro_dismissed') === '1';
@@ -477,6 +479,9 @@ b.className = c.join(' ');
 function setMode(m) {
 currentMode = m;
 recapActive = false;
+reviewActive = false;
+renderQuickChips();
+refreshSessionBanner();
 localStorage.setItem('aihc_last_mode', m);
 setModeBtn(m === 'coach' ? modeCoachBtn : m === 'session' ? modeSessionBtn : modeTrackBtn);
 resetChat();
@@ -500,8 +505,8 @@ refreshSessionBanner();
 }
 function renderQuickChips() {
 const chips = document.getElementById('quick-chips');
+if (recapActive || reviewActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
 if (currentMode !== 'track' && currentMode !== 'session') { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
-if (recapActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
 const mk = (amt) => currentUnits === 'dollars' ? '$' + amt.toFixed(2) : (currentUnits === 'bb' ? amt.toFixed(2) + 'bb' : amt + ' chips');
 let defs;
 if (currentMode === 'session') {
@@ -550,8 +555,30 @@ w.innerHTML = `<div class="bg-purple-900/40 border border-purple-800 text-gray-1
 chatbox.appendChild(w);
 chatbox.scrollTop = chatbox.scrollHeight;
 }
+async function startReview() {
+if (reviewActive) return;
+recapActive = false;
+reviewActive = true;
+reviewHistory = [];
+const chatbox = document.getElementById('chatbox');
+chatbox.innerHTML = `<div class="flex items-start"><div class="bg-cyan-900/40 border border-cyan-800 text-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">Performance review - I'll analyze all your saved sessions and hands: session length vs profit, where you win, where you leak. Ask me anything about how you're playing.</div></div>`;
+const banner = document.getElementById('session-banner');
+banner.innerHTML = `<div class="bg-cyan-900/30 border border-cyan-800 rounded-xl px-3 py-2 flex items-center gap-2">
+<span class="text-xs font-semibold text-cyan-400">Performance review</span>
+<span class="ml-auto text-xs text-gray-500">all saved sessions</span>
+</div>`;
+banner.classList.remove('hidden');
+document.getElementById('quick-chips').classList.add('hidden');
+setActiveTab(tabChat);
+chatView.classList.remove('hidden');
+const inp = document.getElementById('user-input');
+inp.placeholder = 'Ask about your game...';
+inp.value = 'Review my overall performance. Are there themes in how I play? Am I more profitable when I play fewer hands, and where are my biggest leaks?';
+document.getElementById('chat-form').requestSubmit();
+}
 async function startRecap() {
 if (!recapSessionId || recapActive) return;
+reviewActive = false;
 if (__usage && __usage.tier === 'free') { recapActive = false; paywallNotice('recap'); return; }
 recapActive = true;
 const chatbox = document.getElementById('chatbox');
@@ -579,7 +606,7 @@ chatbox.scrollTop = chatbox.scrollHeight;
 });
 async function refreshSessionBanner() {
 const banner = document.getElementById('session-banner');
-if (!banner || recapActive) return;
+if (!banner || recapActive || reviewActive) return;
 if (currentMode !== 'track' && currentMode !== 'session') { banner.classList.add('hidden'); return; }
 const sessions = await fetchSessions();
 const open = sessions.find(s => s.status === 'open');
@@ -991,6 +1018,15 @@ const roi = totalBuyins > 0 ? (totalProfit / totalBuyins) * 100 : null;
 const roiStr = roi === null ? '-' : (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%';
 
 let html = '';
+if (sessions.length > 0 || entries.length > 0) {
+html += `<button onclick="startReview()" class="w-full bg-cyan-950/40 border border-cyan-800/70 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-cyan-900/40 transition text-left">
+<div>
+<p class="text-sm font-semibold text-cyan-400">Performance review</p>
+<p class="text-xs text-gray-500 mt-0.5">AI analyzes all your saved sessions and hands - are you more profitable when you play fewer hands, where do you leak, themes across nights.</p>
+</div>
+<span class="text-cyan-400 flex-shrink-0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clip-rule="evenodd"/></svg></span>
+</button>`;
+}
 if (open) {
 const bin = open.buyins || 0;
 html += `<div class="bg-emerald-900/30 border border-emerald-800 rounded-xl p-4 space-y-1">
@@ -1151,31 +1187,42 @@ const no = document.createElement('button'); no.className = 'text-gray-500 hover
 row.appendChild(btn); row.appendChild(no); b.appendChild(row);
 w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeight;
 }
+function exitReview() {
+if (!reviewActive) return;
+reviewActive = false;
+reviewHistory = [];
+refreshSessionBanner();
+renderQuickChips();
+}
 async function sendMessage(e) {
 e.preventDefault(); const text = input.value.trim(); if (!text) return;
 appendMessage(text, true); input.value = ''; input.disabled = true; sendBtn.disabled = true;
 const lb = appendTyping(chatbox);
 const { data: { session } } = await sb.auth.getSession();
-const mode = recapActive ? 'recap' : currentMode;
+const mode = recapActive ? 'recap' : reviewActive ? 'review' : currentMode;
 const body = { message: text, mode, units: currentUnits };
 if (recapActive && recapSessionId) body.session_id = recapSessionId;
+if (reviewActive) body.history = reviewHistory;
 try {
 const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] = 'Bearer ' + session.access_token;
 const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify(body) });
 const data = await res.json();
 if (data.quota) {
 if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
+if (reviewActive) exitReview();
 if (localStorage.getItem('aihc_card_dismissed_' + data.quota)) lb.textContent = data.reply || data.error || 'No response.';
 else { lb.remove(); appendUpgradeCard(data.quota, data.reply, data.bullets); }
 } else {
 lb.textContent = data.reply || data.error || 'No response.';
+if (reviewActive && data.reply && !data.error) reviewHistory.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
 }
-if (!recapActive) cachedHistory = null;
+if (!recapActive && !reviewActive) cachedHistory = null;
 if (data.paywall) {
 if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
+if (reviewActive) exitReview();
 showPlanModal();
 }
-if (data.reply && data.reply.includes('Session closed') && !recapActive) {
+if (data.reply && data.reply.includes('Session closed') && !recapActive && !reviewActive) {
 checkSession();
 offerRecap();
 }
