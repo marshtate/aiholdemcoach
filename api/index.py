@@ -57,6 +57,35 @@ def groq_ask(messages, tools=None, tool_choice=None):
 				break
 	raise last_err
 
+GROQ_VISION_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview", "meta-llama/llama-4-scout-17b-16e-instruct"]
+
+def groq_vision_text(image_b64, prompt, mime="image/jpeg"):
+	models = []
+	env_m = os.environ.get("GROQ_VISION_MODEL", "").strip()
+	if env_m:
+		models.append(env_m)
+	models += GROQ_VISION_MODELS
+	last_err = None
+	for model in models:
+		try:
+			msg = {"role": "user", "content": [
+				{"type": "text", "text": prompt},
+				{"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_b64}"}},
+			]}
+			resp = groq_client.chat.completions.create(model=model, messages=[msg], max_tokens=4000)
+			return resp.choices[0].message.content or ""
+		except Exception as e:
+			last_err = e
+			code = getattr(e, "status_code", 0)
+			low = str(e).lower()
+			if code in (429, 500, 502, 503, 504) or "rate limit" in low:
+				time.sleep(0.6)
+				continue
+			if code == 400 and any(k in low for k in ("vision", "image", "model", "modality", "content type", "not support")):
+				continue
+			break
+	raise last_err
+
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 DISCORD_SUPPORT_WEBHOOK_URL = os.environ.get("DISCORD_SUPPORT_WEBHOOK_URL")
 USER_AGENT = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
@@ -1457,6 +1486,13 @@ async def import_hands(req: Request):
         return {"error": "Couldn't find any hands in what you pasted. Try one hand per line like: AKo BTN raise won 25"}
     if len(hands) > 500:
         return {"error": "That's more than 500 hands. Import in smaller batches."}
+    try:
+        return commit_import(uid, units, label, text, source, hands)
+    except Exception as exc:
+        discord_ping(f"import hands: {exc}")
+        return {"error": str(exc)}
+
+def commit_import(user_id, units, label, text, source, hands):
     profit = 0.0
     resolved = 0
     for h in hands:
@@ -1465,25 +1501,111 @@ async def import_hands(req: Request):
             resolved += 1
     profit = round(profit, 2) if resolved else None
     now = datetime.now(timezone.utc).isoformat()
+    sid = supabase.table("sessions").insert({
+        "user_id": user_id, "units": units, "status": "closed", "label": label,
+        "profit": profit, "cashout": None, "created_at": now, "closed_at": now
+    }).execute().data[0]["id"]
+    rows = []
+    for h in hands:
+        rows.append({
+            "user_id": user_id, "session_id": sid, "hand": h["hand"],
+            "position": h.get("position"), "player_action": h.get("action"),
+            "result": h.get("result"), "amount": h.get("amount"),
+            "input": text[:1000] if text else f"Imported {source or 'hand'} history",
+            "reply": f"Imported from {source or 'hand history'}.",
+        })
+    supabase.table("messages").insert(rows).execute()
+    return {"ok": True, "session_id": sid, "hands": len(hands), "profit": profit, "units": units, "resolved": resolved, "source": source}
+
+def _strip_data_uri(b64):
+    b64 = (b64 or "").strip()
+    if b64.startswith("data:"):
+        if "," in b64:
+            b64 = b64.split(",", 1)[1]
+    return b64.replace(" ", "+")
+
+@app.post("/api/import/screenshot")
+async def import_screenshot(req: Request):
+    uid, email = auth_identity(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    ent = entitlement(uid, email)
+    if not (ent.get("limits") or {}).get("import"):
+        return {"error": "Importing hand histories is a Pro feature. Upgrade to unlock it.", "paywall": "import"}
     try:
-        sid = supabase.table("sessions").insert({
-            "user_id": uid, "units": units, "status": "closed", "label": label,
-            "profit": profit, "cashout": None, "created_at": now, "closed_at": now
-        }).execute().data[0]["id"]
-        rows = []
-        for h in hands:
-            rows.append({
-                "user_id": uid, "session_id": sid, "hand": h["hand"],
-                "position": h.get("position"), "player_action": h.get("action"),
-                "result": h.get("result"), "amount": h.get("amount"),
-                "input": text[:1000] if text else f"Imported {source or 'hand'} history",
-                "reply": f"Imported from {source or 'hand history'}.",
-            })
-        supabase.table("messages").insert(rows).execute()
-        return {"ok": True, "session_id": sid, "hands": len(hands), "profit": profit, "units": units, "resolved": resolved, "source": source}
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    raw_uri = str(body.get("image") or "")
+    b64 = _strip_data_uri(raw_uri)
+    if not b64:
+        return {"error": "No image received."}
+    try:
+        raw_img = base64.b64decode(b64)
+    except Exception:
+        pad = b64 + "=" * (-len(b64) % 4)
+        try:
+            raw_img = base64.b64decode(pad)
+        except Exception:
+            return {"error": "Could not read that image."}
+    if not raw_img:
+        return {"error": "Could not read that image."}
+    if len(raw_img) > 9_000_000:
+        return {"error": "Image is too large. Use a smaller screenshot."}
+    mime = "image/png" if raw_uri.startswith("data:image/png") else "image/jpeg"
+    prompt = ("Transcribe the poker hand history in this image EXACTLY, verbatim, as plain text: "
+              "card hands, positions, actions, and dollar amounts, keeping every line break and number. "
+              "If the image instead shows a session or profit summary (like 'Won $50 tonight' or a cashier/"
+              "results screen), transcribe those figures too. Output ONLY the transcribed text - no commentary, "
+              "no markdown, no headers.")
+    try:
+        text = groq_vision_text(b64, prompt, mime)
     except Exception as exc:
-        discord_ping(f"import hands: {exc}")
-        return {"error": str(exc)}
+        discord_ping(f"screenshot vision: {exc}")
+        return {"error": "Could not read the image. Try a sharper screenshot."}
+    text = (text or "").strip()
+    if not text:
+        return {"error": "Could not read the image. Try a sharper screenshot."}
+    source = str(body.get("source") or "").strip().lower()
+    label = str(body.get("label") or "").strip()[:40] or None
+    units = str(body.get("units") or ("chips" if source == "offsuit" else "dollars")).lower()
+    if units not in ("dollars", "bb", "chips"):
+        units = "dollars"
+    hands = parse_hand_text(text, source)
+    if hands:
+        if len(hands) > 500:
+            return {"error": "That's more than 500 hands. Import in smaller batches."}
+        try:
+            return commit_import(uid, units, label, text, source, hands)
+        except Exception as exc:
+            discord_ping(f"screenshot commit: {exc}")
+            return {"error": str(exc)}
+    fall = None
+    for ln in text.splitlines():
+        low = ln.lower()
+        if re.search(r"\b(won|lost|profit|made|net)\b", low):
+            nums = _nums(ln)
+            if nums:
+                fall = nums[0]
+                if "lost" in low or "loss" in low:
+                    fall = -abs(fall)
+                break
+        m = re.search(r"([+-])\s*\$?\s*(\d+(?:\.\d+)?)", ln)
+        if m:
+            fall = float(m.group(2)) if m.group(1) == "+" else -float(m.group(2))
+            break
+    if fall is not None and abs(fall) < 1_000_000_000:
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            sid = supabase.table("sessions").insert({
+                "user_id": uid, "units": units, "status": "closed", "label": label,
+                "profit": round(fall, 2), "cashout": None, "created_at": now, "closed_at": now
+            }).execute().data[0]["id"]
+            return {"ok": True, "session_id": sid, "hands": 0, "profit": round(fall, 2), "units": units, "resolved": 1, "source": "screenshot", "summary": True}
+        except Exception as exc:
+            discord_ping(f"screenshot sum: {exc}")
+            return {"error": str(exc)}
+    return {"error": "Couldn't find hands or a profit figure in that screenshot. Try a clearer image of the hand history."}
 
 DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
