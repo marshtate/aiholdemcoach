@@ -1037,6 +1037,8 @@ async def import_session(req: Request):
 
 DISCORD_CLIENT_ID = os.environ.get("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.environ.get("DISCORD_CLIENT_SECRET", "")
+DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+DISCORD_ROLE_PREMIUM = os.environ.get("DISCORD_ROLE_PREMIUM", "")
 DISCORD_GUILD_ID = os.environ.get("DISCORD_GUILD_ID") or "1549096373977354271"
 DISCORD_FALLBACK_INVITE = "https://discord.gg/KB4rNwnea"
 _widget_cache = {"at": 0.0, "data": None}
@@ -1117,6 +1119,12 @@ async def discord_link(req: Request):
         rel = supabase.table("discord_links")
         rel.delete().eq("user_id", uid).execute()
         rel.insert({"user_id": uid, "discord_id": discord_id, "discord_username": username}).execute()
+        try:
+            sub = supabase.table("subscriptions").select("tier,status").eq("user_id", uid).eq("tier", "premium").in_("status", ("active", "trial", "legacy")).limit(1).execute()
+            if sub.data:
+                assign_premium_role(discord_id)
+        except Exception:
+            pass
         return {"ok": True, "username": username}
     except Exception as exc:
         discord_ping(f"discord link exception: {exc}")
@@ -1644,6 +1652,29 @@ async def support_ticket(req: Request):
         threading.Thread(target=post, daemon=True).start()
     return {"ok": True, "ticket": tid}
 
+def user_discord_ids(uid):
+    try:
+        res = supabase.table("discord_links").select("discord_id").eq("user_id", uid).execute()
+        return [r["discord_id"] for r in (res.data or []) if r.get("discord_id")]
+    except Exception:
+        return []
+
+def assign_premium_role(discord_id):
+    guild = DISCORD_GUILD_ID
+    role = DISCORD_ROLE_PREMIUM
+    if not (guild and DISCORD_BOT_TOKEN and role) or not discord_id:
+        return False
+    try:
+        req = urllib.request.Request(
+            f"https://discord.com/api/v10/guilds/{guild}/members/{discord_id}/roles/{role}",
+            data=b"", method="PUT",
+            headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "Content-Length": "0", "User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return res.status in (200, 204)
+    except Exception as exc:
+        discord_ping(f"premium role assign: {exc}")
+        return False
+
 @app.post("/api/stripe/checkout")
 async def stripe_checkout(req: Request):
     uid, email = auth_identity(req)
@@ -1740,6 +1771,9 @@ async def stripe_webhook(req: Request):
                     discord_ping(f"New subscriber - {plan.upper()} | {cu_email or 'no email'} | {amt_str}")
                 except Exception:
                     pass
+                if plan == "premium":
+                    for did in user_discord_ids(uid):
+                        assign_premium_role(did)
         elif typ == "customer.subscription.updated":
             sub_id = obj.get("id") or ""
             uid = find_user_by_subscription(sub_id)
