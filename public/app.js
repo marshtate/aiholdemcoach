@@ -966,7 +966,52 @@ return `<button onclick="openSession(${s.id}, 'home-view')" class="w-full flex j
 </div>`;
 }
 
+html += await weeklyCardHtml();
 el.innerHTML = html;
+}
+function sigMoney(x) {
+if (x === null || x === undefined) return '-';
+return (x >= 0 ? '+' : '-') + '$' + Math.abs(x).toFixed(2);
+}
+async function weeklyCardHtml() {
+let w = null;
+try { w = await authedFetch('/api/weekly'); } catch {}
+if (!w || w.error) return '';
+const wk = w.week || {}, pv = w.prev || {};
+if (!wk.nights && !pv.nights && !wk.hands) {
+return `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<h3 class="text-sm font-semibold text-gray-300">Your week</h3>
+<p class="text-xs text-gray-500">No sessions logged this week. Play a night and log it - your weekly wrap-up shows up here.</p>
+<button onclick="goToTab('chat')" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Log a session</button>
+</div>`;
+}
+let html = `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<div class="flex items-center justify-between">
+<h3 class="text-sm font-semibold text-gray-300">Your week in poker</h3>
+<button onclick="startReview()" class="text-xs text-emerald-400 hover:text-emerald-300">deep dive</button>
+</div>`;
+if (!wk.nights) {
+html += `<p class="text-xs text-gray-500">No sessions yet this week.`;
+if (pv.nights) html += ` Last week: ${pv.nights} night${pv.nights > 1 ? 's' : ''} ${sigMoney(pv.profit)}.`;
+html += `</p></div>`;
+return html;
+}
+const box = (label, val, cls) => `<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${cls}">${val}</p><p class="text-xs text-gray-500">${label}</p></div>`;
+html += `<div class="grid grid-cols-3 gap-2">
+${box('Nights', wk.nights, 'text-emerald-400')}
+${box('Profit', sigMoney(wk.profit), wk.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}
+${box('Win rate', wk.win_rate !== null && wk.win_rate !== undefined ? wk.win_rate + '%' : '-', 'text-amber-400')}
+</div>`;
+if (wk.best) html += `<p class="text-xs text-gray-500">Best night: <span class="text-emerald-400 font-semibold">${sigMoney(wk.best.profit)}</span> <span class="text-gray-600">${new Date(wk.best.date).toLocaleDateString()}</span></p>`;
+if (wk.worst && wk.worst.profit < 0) html += `<p class="text-xs text-gray-500">Roughest night: <span class="text-red-400 font-semibold">${sigMoney(wk.worst.profit)}</span> <span class="text-gray-600">${new Date(wk.worst.date).toLocaleDateString()}</span></p>`;
+if (wk.biggest_win) html += `<p class="text-xs text-gray-500">Biggest win: <span class="text-emerald-400 font-semibold">${wk.biggest_win}</span></p>`;
+if (wk.biggest_loss) html += `<p class="text-xs text-gray-500">Biggest loss: <span class="text-red-400 font-semibold">${wk.biggest_loss}</span></p>`;
+if (wk.leak) html += `<p class="text-xs text-amber-300/90">${wk.leak}</p>`;
+if (pv.nights) {
+const delta = Math.round((wk.profit - pv.profit) * 100) / 100;
+html += `<p class="text-xs text-gray-500">vs last week: <span class="font-semibold ${delta >= 0 ? 'text-emerald-400' : 'text-red-400'}">${sigMoney(delta)}</span> (${pv.nights} nights)</p>`;
+}
+return html + '</div>';
 }
 if (__usage && __usage.tier === 'free' && !__dismissedGoPro) {
 const card = `<div id="gopro-card" class="bg-black border border-neutral-800 rounded-xl p-4 space-y-2 mb-3">
