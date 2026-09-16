@@ -7,7 +7,7 @@ const logoutBtn = document.getElementById('logout-btn');
 const sessionDot = document.getElementById('session-dot');
 const appHeader = document.getElementById('app-header');
 const modeToggle = document.getElementById('mode-toggle-header');
-let currentMode = 'coach';
+let currentMode = localStorage.getItem('aihc_last_mode') || 'coach';
 let cachedHistory = null;
 let recapActive = false;
 let recapSessionId = null;
@@ -464,41 +464,62 @@ sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecover
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(function() {}); }
 const modeCoachBtn = document.getElementById('mode-coach-btn');
 const modeTrackBtn = document.getElementById('mode-track-btn');
+const modeSessionBtn = document.getElementById('mode-session-btn');
+const modeBtns = [modeCoachBtn, modeTrackBtn, modeSessionBtn];
 
-modeCoachBtn.addEventListener('click', () => {
-currentMode = 'coach';
-recapActive = false;
-modeCoachBtn.className = modeCoachBtn.className.replace('mode-inactive', 'mode-active');
-modeTrackBtn.className = modeTrackBtn.className.replace('mode-active', 'mode-inactive');
-resetChat();
+function setModeBtn(activeBtn) {
+modeBtns.forEach(b => {
+let c = b.className.split(' ').filter(x => x !== 'mode-active' && x !== 'mode-inactive');
+c.push(b === activeBtn ? 'mode-active' : 'mode-inactive');
+b.className = c.join(' ');
 });
-modeTrackBtn.addEventListener('click', () => {
-currentMode = 'track';
+}
+function setMode(m) {
+currentMode = m;
 recapActive = false;
-modeTrackBtn.className = modeTrackBtn.className.replace('mode-inactive', 'mode-active');
-modeCoachBtn.className = modeCoachBtn.className.replace('mode-active', 'mode-inactive');
+localStorage.setItem('aihc_last_mode', m);
+setModeBtn(m === 'coach' ? modeCoachBtn : m === 'session' ? modeSessionBtn : modeTrackBtn);
 resetChat();
-});
+}
+modeCoachBtn.addEventListener('click', () => setMode('coach'));
+modeTrackBtn.addEventListener('click', () => setMode('track'));
+modeSessionBtn.addEventListener('click', () => setMode('session'));
+setModeBtn(currentMode === 'coach' ? modeCoachBtn : currentMode === 'session' ? modeSessionBtn : modeTrackBtn);
 
 function resetChat() {
 const chatbox = document.getElementById('chatbox');
-const intro = currentMode === 'coach'? 'Send me any hand - your cards, the board, your position - and I\'ll give you a real read.': 'Track mode. Log hands as you play. When you call it a night, say "done" and I\'ll confirm your buy-in and cash-out before closing.';
+let intro = 'Send me any hand - your cards, the board, your position - and I\'ll give you a real read.';
+let ph = 'Type your hand...';
+if (currentMode === 'coach') { intro = 'Send me any hand - your cards, the board, your position - and I\'ll give you a real read.'; ph = 'Type your hand...'; }
+else if (currentMode === 'session') { intro = 'Session mode. Tell me your buy-ins as you play, and how you ended up at the end of the night - no cards needed. Say "done" to close your session.'; ph = 'Buy-in or done...'; }
+else { intro = 'Track mode. Log hands as you play. When you call it a night, say "done" and I\'ll confirm your buy-in and cash-out before closing.'; ph = 'Log your hand...'; }
 chatbox.innerHTML = `<div class="flex items-start"><div class="bg-[#1a1a1a] text-gray-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">${intro}</div></div>`;
-document.getElementById('user-input').placeholder = currentMode === 'coach'? 'Type your hand...': 'Log your hand...';
+document.getElementById('user-input').placeholder = ph;
 renderQuickChips();
 refreshSessionBanner();
 }
 function renderQuickChips() {
 const chips = document.getElementById('quick-chips');
-if (currentMode !== 'track' || recapActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
+if (currentMode !== 'track' && currentMode !== 'session') { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
+if (recapActive) { chips.classList.add('hidden'); chips.innerHTML = ''; return; }
 const mk = (amt) => currentUnits === 'dollars' ? '$' + amt.toFixed(2) : (currentUnits === 'bb' ? amt.toFixed(2) + 'bb' : amt + ' chips');
-const defs = [
+let defs;
+if (currentMode === 'session') {
+defs = [
+{ a: 'Bought in ' + mk(5), b: 'Bought in ' + mk(5) },
+{ a: 'Bought in ' + mk(20), b: 'Bought in ' + mk(20) },
+{ a: 'Bought in ' + mk(100), b: 'Bought in ' + mk(100) },
+{ a: 'Done', b: 'Done for the night' }
+];
+} else {
+defs = [
 { a: 'Won +' + mk(20), b: 'Won ' + mk(20) },
 { a: 'Rebuy ' + mk(5), b: 'Bought in ' + mk(5) },
 { a: 'Rebuy ' + mk(20), b: 'Bought in ' + mk(20) },
 { a: 'Rebuy ' + mk(100), b: 'Bought in ' + mk(100) },
 { a: 'Done', b: 'Done for the night' }
 ];
+}
 chips.innerHTML = defs.map(c => `<button type="button" data-fill="${c.b}" class="flex-shrink-0 bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-gray-300 text-xs font-medium px-3 py-1.5 rounded-full transition">${c.a}</button>`).join('');
 if (recapSessionId && !recapActive) {
 chips.innerHTML += `<button type="button" data-action="recap" class="flex-shrink-0 border border-emerald-600 text-emerald-400 hover:bg-emerald-600 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-full transition">Recap session</button>`;
@@ -559,7 +580,7 @@ chatbox.scrollTop = chatbox.scrollHeight;
 async function refreshSessionBanner() {
 const banner = document.getElementById('session-banner');
 if (!banner || recapActive) return;
-if (currentMode !== 'track') { banner.classList.add('hidden'); return; }
+if (currentMode !== 'track' && currentMode !== 'session') { banner.classList.add('hidden'); return; }
 const sessions = await fetchSessions();
 const open = sessions.find(s => s.status === 'open');
 if (open) {
