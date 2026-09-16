@@ -95,6 +95,7 @@ const l = __usage.limits || {};
 const parts = [];
 if (l.coach) parts.push('Coach left today: ' + Math.max(0, l.coach - (c.coach || 0)));
 if (l.track) parts.push('Hands left: ' + Math.max(0, l.track - (c.track || 0)));
+if (l.recap_daily && (c.recap || 0) < l.recap_daily) parts.push('Free recap left: ' + Math.max(0, l.recap_daily - (c.recap || 0)));
 el.textContent = parts.join(' · ');
 el.classList.remove('hidden');
 } else if (el) el.classList.add('hidden');
@@ -106,7 +107,7 @@ const trial = document.getElementById('settings-plan-trial');
 if (!val) return;
 if (__usage) {
 val.textContent = planLabel(__usage.plan);
-if (__usage.plan === 'trial') { if (trial) trial.classList.remove('hidden'); }
+if (__usage.plan === 'trial') { if (trial) { trial.classList.remove('hidden'); trial.textContent = (__usage.trial && __usage.trial.days_left !== undefined) ? (__usage.trial.days_left + (__usage.trial.days_left === 1 ? ' day' : ' days') + ' left in your trial') : '7-day trial'; } }
 else if (trial) trial.classList.add('hidden');
 if (btn) {
 if (__usage.tier === 'free') { btn.textContent = 'See plans'; btn.onclick = showPlanModal; }
@@ -124,6 +125,10 @@ try {
 const r = await authedFetch('/api/usage');
 if (r && !r.error) __usage = r;
 } catch {}
+if (__usage && __usage.tier === 'free' && __usage.trial && __usage.trial.ended && !localStorage.getItem('aihc_trial_end_seen')) {
+localStorage.setItem('aihc_trial_end_seen', '1');
+setTimeout(appendTrialEndCard, 400);
+}
 updatePlanLabel();
 updateQuotaPill();
 const hv = document.getElementById('home-view');
@@ -999,6 +1004,43 @@ b.className = isUser? 'bg-emerald-600 text-white px-4 py-2.5 rounded-2xl rounded
 b.textContent = text; w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeight; return b;
 }
 
+function appendUpgradeCard(kind, msg, bullets) {
+const w = document.createElement('div'); w.className = 'flex justify-start';
+const b = document.createElement('div');
+b.className = 'bg-neutral-900/70 border border-neutral-800 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm overflow-hidden';
+const head = document.createElement('p'); head.className = 'px-4 pt-3 text-xs font-semibold text-emerald-400 uppercase tracking-wide';
+head.textContent = 'Free ' + (kind === 'recap' ? 'recap' : kind) + ' used up';
+b.appendChild(head);
+const body = document.createElement('p'); body.className = 'mt-1 px-4 text-gray-200 whitespace-pre-wrap'; body.textContent = msg;
+b.appendChild(body);
+if (bullets && bullets.length) {
+const ul = document.createElement('ul'); ul.className = 'mt-2 px-4 space-y-1';
+bullets.forEach((x) => { const li = document.createElement('li'); li.className = 'flex items-start gap-2 text-gray-300'; const s = document.createElement('span'); s.className = 'text-emerald-400'; s.textContent = '+'; const t = document.createElement('span'); t.textContent = x; li.appendChild(s); li.appendChild(t); ul.appendChild(li); });
+b.appendChild(ul);
+}
+if (kind === 'recap') { const fb = document.createElement('p'); fb.className = 'mt-2 px-4 text-xs text-gray-500'; fb.textContent = 'Your free recap resets at midnight. Pro users get unlimited recap.'; b.appendChild(fb); }
+const row = document.createElement('div'); row.className = 'mt-3 px-4 pb-3 flex items-center gap-2';
+const btn = document.createElement('button'); btn.className = 'bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition'; btn.textContent = 'See plans'; btn.onclick = showPlanModal;
+const no = document.createElement('button'); no.className = 'text-gray-500 hover:text-gray-300 text-xs px-2 py-1.5'; no.textContent = 'Not now'; no.onclick = () => { localStorage.setItem('aihc_card_dismissed_' + kind, '1'); w.remove(); };
+row.appendChild(btn); row.appendChild(no); b.appendChild(row);
+w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeight;
+}
+function appendTrialEndCard() {
+const chatbox = document.getElementById('chatbox');
+if (!chatbox) return;
+const w = document.createElement('div'); w.className = 'flex justify-start';
+const b = document.createElement('div');
+b.className = 'bg-neutral-900/70 border border-neutral-800 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm overflow-hidden';
+const head = document.createElement('p'); head.className = 'px-4 pt-3 text-xs font-semibold text-amber-400 uppercase tracking-wide'; head.textContent = 'Your free trial ended';
+b.appendChild(head);
+const body = document.createElement('p'); body.className = 'mt-1 px-4 text-gray-200'; body.textContent = 'The Free plan still works - 5 coach chats, 10 tracked hands, and 1 recap a day. Pro brings back unlimited coaching, nightly recap, and session import.';
+b.appendChild(body);
+const row = document.createElement('div'); row.className = 'mt-3 px-4 pb-3 flex items-center gap-2';
+const btn = document.createElement('button'); btn.className = 'bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition'; btn.textContent = 'See plans'; btn.onclick = showPlanModal;
+const no = document.createElement('button'); no.className = 'text-gray-500 hover:text-gray-300 text-xs px-2 py-1.5'; no.textContent = 'Not now'; no.onclick = () => w.remove();
+row.appendChild(btn); row.appendChild(no); b.appendChild(row);
+w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeight;
+}
 async function sendMessage(e) {
 e.preventDefault(); const text = input.value.trim(); if (!text) return;
 appendMessage(text, true); input.value = ''; input.disabled = true; sendBtn.disabled = true;
@@ -1011,7 +1053,13 @@ try {
 const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] = 'Bearer ' + session.access_token;
 const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify(body) });
 const data = await res.json();
+if (data.quota) {
+if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
+if (localStorage.getItem('aihc_card_dismissed_' + data.quota)) lb.textContent = data.reply || data.error || 'No response.';
+else { lb.remove(); appendUpgradeCard(data.quota, data.reply, data.bullets); }
+} else {
 lb.textContent = data.reply || data.error || 'No response.';
+}
 if (!recapActive) cachedHistory = null;
 if (data.paywall) {
 if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
@@ -1270,7 +1318,6 @@ else goToTab('stats');
 });
 }
 function recapSession(sid) {
-if (__usage && __usage.tier === 'free') { paywallNotice('recap'); return; }
 recapSessionId = sid;
 recapActive = false;
 goToTab('chat');
