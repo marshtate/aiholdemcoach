@@ -287,9 +287,32 @@ applyTheme();
 refreshSettingsUI();
 settingsBtn.addEventListener('click', openSettings);
 
+function hideSplash() {
+const s = document.getElementById('splash');
+if (!s || s.classList.contains('hidden')) return;
+s.classList.add('hidden');
+setTimeout(() => s.remove(), 400);
+}
+function showHomeSkeleton() {
+const el = document.getElementById('home-view');
+if (!el || el.dataset.loaded) return;
+el.innerHTML = `<div class="space-y-4 view-in">
+<div class="loading-skeleton h-16"></div>
+<div class="grid grid-cols-2 gap-3">
+<div class="loading-skeleton h-20"></div>
+<div class="loading-skeleton h-20"></div>
+</div>
+<div class="loading-skeleton h-28"></div>
+<div class="loading-skeleton h-40"></div>
+</div>`;
+}
+function viewSkeleton(viewId, blocks) {
+const el = document.getElementById(viewId);
+if (!el) return;
+el.innerHTML = `<div class="space-y-4 view-in">${blocks.map(b => `<div class="loading-skeleton ${b}"></div>`).join('')}</div>`;
+}
 function showApp() {
-const splash = document.getElementById('splash');
-if (splash) splash.classList.add('hidden');
+hideSplash();
 document.getElementById('bottom-nav').classList.remove('hidden');
 appHeader.classList.remove('hidden');
 authScreen.classList.add('hidden');
@@ -297,13 +320,13 @@ appScreen.classList.remove('hidden');
 logoutBtn.classList.remove('hidden');
 settingsBtn.classList.remove('hidden');
 checkSession();
+showHomeSkeleton();
 loadHome();
 showOnboarding();
 refreshUsage();
 }
 function showAuth() {
-const splash = document.getElementById('splash');
-if (splash) splash.classList.add('hidden');
+hideSplash();
 document.getElementById('bottom-nav').classList.add('hidden');
 appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
@@ -429,7 +452,7 @@ showResetPanel();
 if (event === 'SIGNED_OUT') { showAuth(); }
 });
 handleDiscordCallback();
-sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecovery()) showApp(); else { const splash = document.getElementById('splash'); if (splash) splash.classList.add('hidden'); } });
+sb.auth.getSession().then(({ data: { session } }) => { if (session && !isRecovery()) showApp(); else hideSplash(); });
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js').catch(function() {}); }
 const modeCoachBtn = document.getElementById('mode-coach-btn');
 const modeTrackBtn = document.getElementById('mode-track-btn');
@@ -648,11 +671,13 @@ return data.sessions || [];
 }
 
 async function loadHome() {
+const el = document.getElementById('home-view');
+if (!el.dataset.loaded) showHomeSkeleton();
 const entries = await fetchHistory();
 const sessions = await fetchSessions();
-const el = document.getElementById('home-view');
 if (entries.length === 0 && sessions.length === 0) {
-el.innerHTML = `<div class="text-center py-12 space-y-4">
+el.dataset.loaded = '1';
+el.innerHTML = `<div class="text-center py-12 space-y-4 view-in">
 <div class="mx-auto w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 text-emerald-500"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM8.25 10.5a.75.75 0 00-.75.75v2.25a.75.75 0 001.5 0v-2.25a.75.75 0 00-.75-.75zm3.75 0a.75.75 0 00-.75.75v3.75a.75.75 0 001.5 0V11.25a.75.75 0 00-.75-.75zm3.75 0a.75.75 0 00-.75.75v1.5a.75.75 0 001.5 0v-1.5a.75.75 0 00-.75-.75z" clip-rule="evenodd"/></svg>
 </div>
@@ -781,8 +806,9 @@ const card = `<div id="gopro-card" class="bg-black border border-neutral-800 rou
 document.getElementById('home-view').insertAdjacentHTML('afterbegin', card);
 }
 async function loadHistory() {
-const entries = await fetchHistory();
 const el = document.getElementById('history-view');
+if (!cachedHistory || cachedHistory.length === 0) viewSkeleton('history-view', ['h-12', 'h-10', 'h-10', 'h-10', 'h-24']);
+const entries = await fetchHistory();
 if (entries.length === 0) {
 el.innerHTML = `<div class="text-center py-16 space-y-4">
 <div class="mx-auto w-16 h-16 rounded-2xl bg-[#1a1a1a] flex items-center justify-center">
@@ -895,6 +921,7 @@ loadHistory();
 }
 
 async function loadStats() {
+if (!cachedHistory || cachedHistory.length === 0) viewSkeleton('stats-view', ['h-20', 'h-16', 'h-16', 'h-40', 'h-10']);
 const entries = await fetchHistory();
 const sessions = await fetchSessions();
 const el = document.getElementById('stats-view');
@@ -1050,6 +1077,13 @@ const b = document.createElement('div');
 b.className = isUser? 'bg-emerald-600 text-white px-4 py-2.5 rounded-2xl rounded-tr-sm text-sm max-w-[85%] shadow-sm break-words whitespace-pre-wrap': 'bg-[#1a1a1a] text-gray-200 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm break-words whitespace-pre-wrap';
 b.textContent = text; w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeight; return b;
 }
+function appendTyping(chatbox) {
+const w = document.createElement('div'); w.className = 'flex justify-start';
+const b = document.createElement('div');
+b.className = 'bg-[#1a1a1a] px-4 py-3 rounded-2xl rounded-tl-sm shadow-sm';
+const d = document.createElement('div'); d.className = 'typing-dots'; d.innerHTML = '<span></span><span></span><span></span>';
+b.appendChild(d); w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeight; return b;
+}
 
 function appendUpgradeCard(kind, msg, bullets) {
 const w = document.createElement('div'); w.className = 'flex justify-start';
@@ -1091,7 +1125,7 @@ w.appendChild(b); chatbox.appendChild(w); chatbox.scrollTop = chatbox.scrollHeig
 async function sendMessage(e) {
 e.preventDefault(); const text = input.value.trim(); if (!text) return;
 appendMessage(text, true); input.value = ''; input.disabled = true; sendBtn.disabled = true;
-const lb = appendMessage('...', false);
+const lb = appendTyping(chatbox);
 const { data: { session } } = await sb.auth.getSession();
 const mode = recapActive ? 'recap' : currentMode;
 const body = { message: text, mode, units: currentUnits };
@@ -1169,7 +1203,7 @@ return html;
 let mySocial = null;
 async function loadSocial() {
 const el = document.getElementById('social-view');
-el.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Loading...</p>';
+viewSkeleton('social-view', ['h-28', 'h-24', 'h-16']);
 const data = await authedFetch('/api/friends');
 if (!data || data.error) { el.innerHTML = '<p class="text-sm text-red-400 text-center py-8">' + ((data && data.error) || 'Could not load.') + '</p>'; return; }
 mySocial = data;
@@ -1296,7 +1330,7 @@ return true;
 }
 async function openSession(sid, targetId) {
 const el = document.getElementById(targetId);
-el.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Loading...</p>';
+el.innerHTML = '<div class="space-y-4 view-in"><div class="loading-skeleton h-24"></div><div class="loading-skeleton h-48"></div></div>';
 const data = await authedFetch('/api/session?id=' + sid);
 if (!data || data.error) { el.innerHTML = '<p class="text-sm text-red-400 text-center py-8">' + ((data && data.error) || 'Not found.') + '</p>'; return; }
 const s = data.session;
@@ -1423,7 +1457,7 @@ loadSocial();
 }
 async function viewProfile(username) {
 const el = document.getElementById('social-view');
-el.innerHTML = '<p class="text-sm text-gray-500 text-center py-8">Loading...</p>';
+el.innerHTML = '<div class="space-y-4 view-in"><div class="loading-skeleton h-24"></div><div class="loading-skeleton h-40"></div></div>';
 const data = await authedFetch('/api/profile?username=' + encodeURIComponent(username));
 if (!data || data.error) { el.innerHTML = '<p class="text-sm text-red-400 text-center py-8">' + ((data && data.error) || 'Could not load.') + '</p>'; return; }
 const theirs = data.profile;
