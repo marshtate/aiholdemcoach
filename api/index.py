@@ -1065,10 +1065,14 @@ def _canonical(cards):
         c1, c2 = m.group(1)[0], m.group(1)[1]
         if c1 == c2:
             return c1 + c2
+        if RANK_VALUES[c1] < RANK_VALUES[c2]:
+            c1, c2 = c2, c1
         return c1 + c2 + ("s" if (m.group(2) or "").lower() == "s" else "o")
     return None
 
 def _position_from(rel, n):
+    if n == 2:
+        return "BTN" if rel == 0 else "BB"
     if rel == 0: return "BTN"
     if rel == 1: return "SB"
     if rel == 2: return "BB"
@@ -1080,16 +1084,16 @@ def _parse_poker_block(blk):
     if not hero_m:
         return {}
     hero = hero_m.group(1)
-    cards_m = re.search(r"[\[\(]([^\]\)]+)[\]\)]", blk)
+    cards_m = re.search(r"Dealt to[^\[]*\[([^\]]+)\]", blk)
     hand = _canonical(cards_m.group(1) if cards_m else "") or None
     if not hand:
         return {}
     seats = {}
     for s, nm in re.findall(r"Seat (\d+): ([^(\n]+)", blk):
         seats[int(s)] = nm.strip()
-    n = max(seats) if seats else 2
+    n = (max(seats) - min(seats) + 1) if seats else 2
     hero_seat = next((s for s, nm in seats.items() if nm == hero or nm.startswith(hero)), None)
-    btn_m = re.search(r"Seat (\d+) is the button", blk)
+    btn_m = re.search(r"Seat #?(\d+) is the button", blk)
     btn = int(btn_m.group(1)) if btn_m else (n or 2)
     pos = ""
     if hero_seat:
@@ -1111,16 +1115,14 @@ def _parse_poker_block(blk):
             contrib += nums[-1]
         elif "call" in low or "bet" in low:
             contrib += nums[0]
+        elif "post" in low and "blind" in low:
+            contrib += nums[0]
     won = None
-    col = re.search(r"(?:collected|wins|won)\s+\$?([\d.,]+)", blk)
-    if col:
-        won = _money(col.group(1))
+    ret = re.search(r"uncalled bet\s*\(?\$?([\d.,]+)\)?\s*(?:returned|back)?\s*(?:to\s*)?" + re.escape(hero), blk)
+    if ret:
+        won = _money(ret.group(1))
     if won is None:
-        ret = re.search(r"uncalled bet\s*\(?\$?([\d.,]+)\)?\s*(?:returned|back)?\s*(?:to\s*)?" + re.escape(hero), blk)
-        if ret:
-            won = _money(ret.group(1))
-    if won is None:
-        ret = re.search(re.escape(hero) + r"\s*(?:wins|collected)\s+\$?([\d.,]+)", blk, re.I)
+        ret = re.search(re.escape(hero) + r"\s*(?:collected|wins|won)\s+.*?([\d][\d,]{0,9}(?:\.\d{1,2})?)", blk, re.I)
         if ret:
             won = _money(ret.group(1))
     hero_showed = bool(re.search(r"^\s*" + re.escape(hero) + r":\s*shows", blk, re.M))
