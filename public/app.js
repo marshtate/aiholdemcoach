@@ -12,6 +12,9 @@ let cachedHistory = null;
 let recapActive = false;
 let reviewActive = false;
 let reviewHistory = [];
+let drillActive = false;
+let drillHistory = [];
+let activeTab = null;
 let recapSessionId = null;
 let __usage = null;
 let __dismissedGoPro = localStorage.getItem('aihc_gopro_dismissed') === '1';
@@ -329,6 +332,8 @@ authScreen.classList.add('hidden');
 appScreen.classList.remove('hidden');
 logoutBtn.classList.remove('hidden');
 settingsBtn.classList.remove('hidden');
+activeTab = tabHome;
+setHeaderTitle();
 checkSession();
 showHomeSkeleton();
 loadHome();
@@ -480,8 +485,11 @@ function setMode(m) {
 currentMode = m;
 recapActive = false;
 reviewActive = false;
+drillActive = false;
+drillHistory = [];
 renderQuickChips();
 refreshSessionBanner();
+setHeaderTitle();
 localStorage.setItem('aihc_last_mode', m);
 setModeBtn(m === 'coach' ? modeCoachBtn : m === 'session' ? modeSessionBtn : modeTrackBtn);
 resetChat();
@@ -558,6 +566,8 @@ chatbox.scrollTop = chatbox.scrollHeight;
 async function startReview() {
 if (reviewActive) return;
 recapActive = false;
+drillActive = false;
+drillHistory = [];
 reviewActive = true;
 reviewHistory = [];
 const chatbox = document.getElementById('chatbox');
@@ -576,11 +586,36 @@ inp.placeholder = 'Ask about your game...';
 inp.value = 'Review my overall performance. Are there themes in how I play? Am I more profitable when I play fewer hands, and where are my biggest leaks?';
 document.getElementById('chat-form').requestSubmit();
 }
+async function startDrill() {
+if (drillActive) return;
+recapActive = false;
+reviewActive = false;
+reviewHistory = [];
+drillActive = true;
+drillHistory = [];
+const chatbox = document.getElementById('chatbox');
+chatbox.innerHTML = `<div class="flex items-start"><div class="bg-orange-900/40 border border-orange-800 text-gray-100 px-4 py-3 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">Leak drills - I'll pull scenarios straight from your logged hands and quiz you one at a time. Answer each hand as you'd play it live, then I'll grade it and move on.</div></div>`;
+const banner = document.getElementById('session-banner');
+banner.innerHTML = `<div class="bg-orange-900/30 border border-orange-800 rounded-xl px-3 py-2 flex items-center gap-2">
+<span class="text-xs font-semibold text-orange-400">Leak drills</span>
+<button onclick="exitDrill()" class="ml-auto text-xs text-gray-400 hover:text-orange-400">exit</button>
+</div>`;
+banner.classList.remove('hidden');
+document.getElementById('quick-chips').classList.add('hidden');
+setActiveTab(tabChat);
+chatView.classList.remove('hidden');
+const inp = document.getElementById('user-input');
+inp.placeholder = 'Your play...';
+inp.value = 'Hit me with a drill. Start with my biggest leak.';
+document.getElementById('chat-form').requestSubmit();
+}
 async function startRecap() {
 if (!recapSessionId || recapActive) return;
 reviewActive = false;
-if (__usage && __usage.tier === 'free') { recapActive = false; paywallNotice('recap'); return; }
+drillActive = false;
+drillHistory = [];
 recapActive = true;
+setHeaderTitle();
 const chatbox = document.getElementById('chatbox');
 chatbox.innerHTML = `<div class="flex items-start"><div class="bg-purple-900/40 text-gray-100 px-4 py-2.5 rounded-2xl rounded-tl-sm text-sm max-w-[85%] shadow-sm">Recap mode - I'll go over your finished session, hand by hand. This conversation doesn't touch your logged hands or stats.</div></div>`;
 const banner = document.getElementById('session-banner');
@@ -659,7 +694,32 @@ const historyView = document.getElementById('history-view');
 const statsView = document.getElementById('stats-view');
 const socialView = document.getElementById('social-view');
 
+function todayGreeting() {
+const h = new Date().getHours();
+if (h < 12) return 'Good morning';
+if (h < 18) return 'Good afternoon';
+return 'Good evening';
+}
+function pageTitle() {
+if (activeTab === tabChat) {
+if (recapActive) return 'Recap';
+if (reviewActive) return 'Performance review';
+if (drillActive) return 'Leak drills';
+return { coach: 'Coach', track: 'Track', session: 'Session' }[currentMode] || 'Coach';
+}
+if (activeTab === tabHome) return todayGreeting();
+if (activeTab === tabHistory) return 'History';
+if (activeTab === tabStats) return 'Stats';
+if (activeTab === tabSocial) return 'Friends';
+return 'AI Holdem Coach';
+}
+function setHeaderTitle() {
+const el = document.getElementById('header-title');
+if (el) el.textContent = pageTitle();
+}
+
 function setActiveTab(active) {
+activeTab = active;
 tabs = [tabHome, tabChat, tabHistory, tabStats, tabSocial];
 views = [homeView, chatView, historyView, statsView, socialView];
 tabs.forEach(t => {
@@ -681,6 +741,7 @@ if (active === tabSocial) socialView.classList.remove('hidden');
 const toggle = document.getElementById('mode-toggle-header');
 if (active === tabChat) { toggle.classList.remove('hidden'); toggle.classList.add('flex'); }
 else { toggle.classList.add('hidden'); toggle.classList.remove('flex'); }
+setHeaderTitle();
 }
 tabHome.addEventListener('click', () => { setActiveTab(tabHome); homeView.classList.remove('hidden'); loadHome(); });
 tabChat.addEventListener('click', () => { setActiveTab(tabChat); chatView.classList.remove('hidden'); renderQuickChips(); refreshSessionBanner(); });
@@ -1025,6 +1086,13 @@ html += `<button onclick="startReview()" class="w-full bg-cyan-950/40 border bor
 <p class="text-xs text-gray-500 mt-0.5">AI analyzes all your saved sessions and hands - are you more profitable when you play fewer hands, where do you leak, themes across nights.</p>
 </div>
 <span class="text-cyan-400 flex-shrink-0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clip-rule="evenodd"/></svg></span>
+</button>
+<button onclick="startDrill()" class="w-full bg-orange-950/40 border border-orange-800/70 rounded-xl p-4 flex items-center justify-between gap-3 hover:bg-orange-900/40 transition text-left">
+<div>
+<p class="text-sm font-semibold text-orange-400">Leak drills</p>
+<p class="text-xs text-gray-500 mt-0.5">Hand quizzes pulled from your own game - answer each spot, get instant feedback, and tighten up the leaks that cost you.</p>
+</div>
+<span class="text-orange-400 flex-shrink-0"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clip-rule="evenodd"/></svg></span>
 </button>`;
 }
 if (open) {
@@ -1193,16 +1261,26 @@ reviewActive = false;
 reviewHistory = [];
 refreshSessionBanner();
 renderQuickChips();
+setHeaderTitle();
+}
+function exitDrill() {
+if (!drillActive) return;
+drillActive = false;
+drillHistory = [];
+refreshSessionBanner();
+renderQuickChips();
+setHeaderTitle();
 }
 async function sendMessage(e) {
 e.preventDefault(); const text = input.value.trim(); if (!text) return;
 appendMessage(text, true); input.value = ''; input.disabled = true; sendBtn.disabled = true;
 const lb = appendTyping(chatbox);
 const { data: { session } } = await sb.auth.getSession();
-const mode = recapActive ? 'recap' : reviewActive ? 'review' : currentMode;
+const mode = recapActive ? 'recap' : reviewActive ? 'review' : drillActive ? 'drill' : currentMode;
 const body = { message: text, mode, units: currentUnits };
 if (recapActive && recapSessionId) body.session_id = recapSessionId;
 if (reviewActive) body.history = reviewHistory;
+if (drillActive) body.history = drillHistory;
 try {
 const h = {'Content-Type': 'application/json'}; if (session) h['Authorization'] = 'Bearer ' + session.access_token;
 const res = await fetch('/api/chat', { method: 'POST', headers: h, body: JSON.stringify(body) });
@@ -1210,19 +1288,22 @@ const data = await res.json();
 if (data.quota) {
 if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
 if (reviewActive) exitReview();
+if (drillActive) exitDrill();
 if (localStorage.getItem('aihc_card_dismissed_' + data.quota)) lb.textContent = data.reply || data.error || 'No response.';
 else { lb.remove(); appendUpgradeCard(data.quota, data.reply, data.bullets); }
 } else {
 lb.textContent = data.reply || data.error || 'No response.';
 if (reviewActive && data.reply && !data.error) reviewHistory.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
+if (drillActive && data.reply && !data.error) drillHistory.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply });
 }
-if (!recapActive && !reviewActive) cachedHistory = null;
+if (!recapActive && !reviewActive && !drillActive) cachedHistory = null;
 if (data.paywall) {
 if (recapActive) { recapActive = false; recapSessionId = null; refreshSessionBanner(); renderQuickChips(); }
 if (reviewActive) exitReview();
+if (drillActive) exitDrill();
 showPlanModal();
 }
-if (data.reply && data.reply.includes('Session closed') && !recapActive && !reviewActive) {
+if (data.reply && data.reply.includes('Session closed') && !recapActive && !reviewActive && !drillActive) {
 checkSession();
 offerRecap();
 }
@@ -1324,7 +1405,7 @@ ${data.friends && data.friends.length > 0 ? data.friends.map(u => `<div class="f
 </div>`;
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <h3 class="text-sm font-semibold text-gray-300">Friend leaderboard</h3>
-<p class="text-xs text-gray-500">Ranks you and your friends by total profit. Sessions only - no hand data is shared.</p>
+<p class="text-xs text-gray-500">Ranks you and your friends by profit - tap the period to compare this week, month, year, or all time. Sessions only - no hand data is shared.</p>
 <div id="leaderboard-holder"></div>
 </div>`;
 html += `<div id="discord-card" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
@@ -1493,14 +1574,19 @@ if (goalStr.trim() !== '') { const g = parseFloat(goalStr); if (isNaN(g)) { aler
 await authedFetch('/api/bankroll', { method: 'POST', body: JSON.stringify({ amount: val, goal: goal }) });
 loadHome();
 }
-async function loadLeaderboard() {
+async function loadLeaderboard(range) {
+range = range || window.__lbRange || 'all';
+window.__lbRange = range;
 const holder = document.getElementById('leaderboard-holder');
 if (!holder) return;
-const data = await authedFetch('/api/leaderboard');
-if (!data || data.error) { holder.innerHTML = '<p class="text-xs text-red-400 py-2">' + ((data && data.error) || 'Could not load.') + '</p>'; return; }
+const labels = { all: 'All time', ytd: 'YTD', month: 'Month', week: 'Week' };
+holder.innerHTML = `<div class="flex gap-1.5 mt-1">${['all', 'ytd', 'month', 'week'].map(r => `<button onclick="loadLeaderboard('${r}')" class="text-[11px] font-semibold px-2.5 py-1 rounded-lg transition ${r === range ? 'bg-emerald-600 text-white' : 'bg-neutral-800/60 text-gray-400 hover:text-gray-200'}">${labels[r]}</button>`).join('')}</div><div id="lb-rows" class="mt-1 text-xs text-gray-500">Loading...</div>`;
+const data = await authedFetch('/api/leaderboard?range=' + range);
+const rowsEl = document.getElementById('lb-rows');
+if (!data || data.error) { if (rowsEl) rowsEl.innerHTML = '<p class="text-xs text-red-400 py-2">' + ((data && data.error) || 'Could not load.') + '</p>'; return; }
 const rows = data.leaderboard || [];
-if (rows.length === 0) { holder.innerHTML = '<p class="text-xs text-gray-500 py-2">No completed sessions among your friends yet.</p>'; return; }
-holder.innerHTML = rows.map(r => `<div class="flex items-center justify-between text-sm py-1 ${r.you ? 'text-emerald-400' : 'text-gray-300'}">
+if (rows.length === 0) { if (rowsEl) rowsEl.innerHTML = '<p class="text-xs text-gray-500 py-2">No completed sessions in this period yet.</p>'; return; }
+if (rowsEl) rowsEl.innerHTML = rows.map(r => `<div class="flex items-center justify-between text-sm py-1 ${r.you ? 'text-emerald-400' : 'text-gray-300'}">
 <span class="font-semibold">${r.rank}. ${r.username}${r.you ? ' (you)' : ''}</span>
 <span class="font-mono ${r.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${money(r.total_profit)}</span>
 </div>`).join('');
