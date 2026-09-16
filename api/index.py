@@ -2123,6 +2123,89 @@ async def leaderboard_endpoint(req: Request):
         r["rank"] = i + 1
     return {"username": me["username"], "leaderboard": rows}
 
+def _closed_dollars(user_id, since=None, until=None):
+    try:
+        q = supabase.table("sessions").select("id, profit, cashout, units, created_at").eq("user_id", user_id).eq("status", "closed")
+        if since:
+            q = q.gte("created_at", since)
+        if until:
+            q = q.lt("created_at", until)
+        res = q.order("created_at", desc=True).execute()
+        rows = list(res.data or [])
+    except Exception:
+        rows = []
+    return [r for r in rows if (r.get("units") or "dollars") == "dollars"]
+
+@app.get("/api/weekly")
+async def weekly_endpoint(req: Request):
+    user_id = auth_user_id(req)
+    if not user_id:
+        return {"error": "unauthorized"}
+    now = datetime.now(timezone.utc)
+    week_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    prev_start = week_start - timedelta(days=7)
+    week = _closed_dollars(user_id, since=week_start.isoformat(), until=now.isoformat())
+    prev = _closed_dollars(user_id, since=prev_start.isoformat(), until=week_start.isoformat())
+    def agg(rows):
+        profits = [r.get("profit") for r in rows if r.get("profit") is not None]
+        if not rows:
+            return {"nights": 0, "profit": 0.0, "win_rate": None, "avg": None, "best": None, "worst": None}
+        total = sum(profits)
+        wins = sum(1 for p in profits if p > 0)
+        best = max(profits)
+        worst = min(profits)
+        best_s = next((r for r in rows if r.get("profit") == best), None)
+        worst_s = next((r for r in rows if r.get("profit") == worst), None)
+        return {
+            "nights": len(rows),
+            "profit": round(total, 2),
+            "win_rate": round(wins / len(profits) * 100) if profits else None,
+            "avg": round(total / len(rows), 2),
+            "best": {"profit": round(best, 2), "date": best_s.get("created_at")} if best_s else None,
+            "worst": {"profit": round(worst, 2), "date": worst_s.get("created_at")} if worst_s else None,
+        }
+    wk = agg(week)
+    pv = agg(prev)
+    hands = []
+    week_sids = {r["id"] for r in week}
+    if week_sids:
+        try:
+            hres = supabase.table("messages").select("session_id, hand, position, player_action, result, amount").in_("session_id", list(week_sids)).execute()
+            hands = [h for h in (hres.data or []) if h.get("hand") and h.get("session_id") in week_sids]
+        except Exception:
+            hands = []
+    wk["hands"] = len(hands)
+    win_hands = [h for h in hands if str(h.get("result") or "").lower() in ("won", "win", "w") and h.get("amount") is not None]
+    loss_hands = [h for h in hands if str(h.get("result") or "").lower() in ("lost", "lose", "l") and h.get("amount") is not None]
+    def desc(h):
+        parts = [h.get("hand") or "?", h.get("position") or "", h.get("player_action") or ""]
+        if h.get("amount") is not None:
+            parts.append("$" + str(h.get("amount")))
+        return " ".join(x for x in parts if x)
+    wk["biggest_win"] = desc(max(win_hands, key=lambda h: h["amount"])) if win_hands else None
+    wk["biggest_loss"] = desc(max(loss_hands, key=lambda h: h["amount"])) if loss_hands else None
+    leak = None
+    if loss_hands:
+        acts = {}
+        for h in loss_hands:
+            a = (h.get("player_action") or "").lower()
+            if a:
+                acts[a] = acts.get(a, 0) + 1
+        act, cnt = (max(acts.items(), key=lambda x: x[1]) if acts else (None, 0))
+        if act in ("fold", "call", "raise", "bet", "check", "all-in"):
+            leak = f"Biggest leak: {act}s lost the most this week ({cnt} hands). Keep them tight."
+        else:
+            leak = f"{len(loss_hands)} losing hands logged this week."
+    elif hands:
+        fold_n = sum(1 for h in hands if (h.get("player_action") or "").lower() == "fold")
+        fr = round(fold_n / len(hands) * 100)
+        if fr >= 50:
+            leak = f"You folded {fr}% of hands this week - maybe a little tight."
+        elif len(hands) < 5:
+            leak = "Log more hands per session for sharper leak notes."
+    wk["leak"] = leak
+    return {"ok": True, "week_start": week_start.isoformat(), "week": wk, "prev": {"nights": pv["nights"], "profit": pv["profit"]}}
+
 @app.post("/api/username")
 async def username_endpoint(req: Request):
     user_id = auth_user_id(req)
