@@ -267,6 +267,36 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 <p id="plan-cta-note" class="text-[10px] text-gray-600 text-center">New accounts get 7 days of Pro free. Cancel anytime.</p>
 </div>
 </div>
+<div id="support-modal" class="hidden fixed inset-0 z-[85] p-6">
+<div class="absolute inset-0 bg-black/80" onclick="hideSupportModal()"></div>
+<div class="relative bg-[#1a1a1a] border border-neutral-800 rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl">
+<div class="flex items-center justify-between">
+<h2 class="font-semibold text-gray-100">Contact support</h2>
+<button onclick="hideSupportModal()" class="text-gray-500 hover:text-gray-300 p-1" aria-label="Close support">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M5.47 5.47a.75.75 0 011.06 0L12 10.94l5.47-5.47a.75.75 0 111.06 1.06L13.06 12l5.47 5.47a.75.75 0 11-1.06 1.06L12 13.06l-5.47 5.47a.75.75 0 01-1.06-1.06L10.94 12 5.47 6.53a.75.75 0 010-1.06z" clip-rule="evenodd"/></svg>
+</button>
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Topic</p>
+<select id="support-topic" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none">
+<option value="billing">Billing or plans</option>
+<option value="bug">Something is broken</option>
+<option value="question">Question</option>
+<option value="feature">Feature idea</option>
+<option value="other">Something else</option>
+</select>
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Message</p>
+<textarea id="support-msg" rows="4" placeholder="Tell us what's going on. Include what you expected vs what happened." class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600"></textarea>
+</div>
+<p id="support-status" class="hidden text-xs"></p>
+<div class="flex gap-2">
+<button onclick="submitSupportTicket()" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Send ticket</button>
+<button onclick="hideSupportModal()" class="px-3 py-2 text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+</div>
+</div>
+</div>
 <nav id="bottom-nav" class="hidden fixed bottom-0 left-0 right-0 bg-black/90 border-t border-neutral-800 backdrop-blur flex justify-around py-2 pb-6 z-10">
 <button id="tab-home" class="flex flex-col items-center gap-0.5 py-1 px-3">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6 nav-icon text-emerald-400"><path d="M11.47 3.84a.75.75 0 011.06 0l8.69 8.69a.75.75 0 11-1.06 1.06l-.97-.97V19.5a2.25 2.25 0 01-2.25 2.25h-3a.75.75 0 01-.75-.75v-4.5a.75.75 0 00-.75-.75h-3a.75.75 0 00-.75.75V21.75a.75.75 0 01-.75.75h-3A2.25 2.25 0 013 19.5v-6.88l-.97.97a.75.75 0 01-1.06-1.06l8.69-8.69z"/></svg>
@@ -328,6 +358,11 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 <p id="settings-plan-trial" class="hidden text-[10px] text-gray-500">Trial: full Pro access for 7 days, then it comes down. No card needed.</p>
 <p class="text-[10px] text-gray-600">Import and unlimited recap are Pro features.</p>
+</div>
+<div class="pt-3 border-t border-neutral-800 space-y-2">
+<p class="text-xs font-medium text-gray-400 uppercase tracking-wider">Support</p>
+<p class="text-[10px] text-gray-500">Something broken, a billing question, or a feature idea? We read every ticket.</p>
+<button onclick="showSupportModal()" class="w-full bg-neutral-700 hover:bg-neutral-600 text-white text-xs font-semibold px-3 py-2 rounded-lg transition">Contact support</button>
 </div>
 <p class="text-[10px] text-gray-600">Settings save automatically on this device.</p>
 <div class="pt-3 border-t border-neutral-800 space-y-2">
