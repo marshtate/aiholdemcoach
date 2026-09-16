@@ -146,6 +146,34 @@ if (!m) return;
 m.classList.add('hidden');
 m.classList.remove('flex', 'items-center', 'justify-center');
 }
+function showSupportModal() {
+const m = document.getElementById('support-modal');
+if (!m) return;
+m.classList.remove('hidden');
+m.classList.add('flex', 'items-center', 'justify-center');
+}
+function hideSupportModal() {
+const m = document.getElementById('support-modal');
+if (!m) return;
+m.classList.add('hidden');
+m.classList.remove('flex', 'items-center', 'justify-center');
+}
+async function submitSupportTicket() {
+const topic = document.getElementById('support-topic').value;
+const msg = document.getElementById('support-msg').value.trim();
+const status = document.getElementById('support-status');
+if (!msg) { status.textContent = 'Write a message first.'; status.className = 'text-xs text-red-400'; return; }
+status.textContent = 'Sending...'; status.className = 'text-xs text-gray-400';
+const res = await authedFetch('/api/support', { method: 'POST', body: JSON.stringify({ topic: topic, message: msg }) });
+if (res && res.ok) {
+document.getElementById('support-msg').value = '';
+status.textContent = 'Sent! Ticket #' + res.ticket + ' - we usually reply within a day.';
+setTimeout(hideSupportModal, 1800);
+} else {
+status.textContent = (res && res.error) || 'Could not send right now. Try again in a minute.';
+status.className = 'text-xs text-red-400';
+}
+}
 async function openCheckout(plan) {
 if (plan === 'premium' || plan === 'pro') {
 const res = await authedFetch('/api/stripe/checkout', { method: 'POST', body: JSON.stringify({ plan: plan }) });
