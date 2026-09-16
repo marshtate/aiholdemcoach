@@ -47,14 +47,32 @@ html[data-theme="light"] .text-emerald-400 { color: #059669; }
 html[data-theme="light"] .tab-active { color: #059669; border-bottom-color: #059669; }
 html[data-theme="light"] .mode-inactive { color: #52525b; }
 html[data-theme="light"] .mode-inactive:hover { color: #1e293b; }
+#splash { transition: opacity 0.35s ease; }
+#splash.hidden { opacity: 0; pointer-events: none; }
+.splash-spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid rgba(52, 211, 153, 0.15); border-top-color: #34d399; animation: spspin 0.9s linear infinite; }
+@keyframes spspin { to { transform: rotate(360deg); } }
+.loading-skeleton { background: linear-gradient(100deg, #161619 40%, #202024 50%, #161619 60%); background-size: 200% 100%; animation: skimmer 1.4s ease-in-out infinite; border-radius: 12px; }
+@keyframes skimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+html[data-theme="light"] .loading-skeleton { background: linear-gradient(100deg, #e4e4e7 40%, #f0f0f1 50%, #e4e4e7 60%); background-size: 200% 100%; }
+.view-in { animation: viewin 0.25s ease; }
+@keyframes viewin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.typing-dots { display: inline-flex; align-items: center; gap: 4px; padding: 4px 0; }
+.typing-dots span { width: 7px; height: 7px; border-radius: 50%; background: #9ca3af; animation: tdot 1.2s infinite ease-in-out; }
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes tdot { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
 </style>
 </head>
 <body class="h-full flex flex-col max-w-xl mx-auto shadow-2xl bg-black text-gray-100 font-sans">
-<div id="splash" class="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center space-y-4">
+<div id="splash" class="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center space-y-5">
 <div class="w-24 h-24 rounded-2xl overflow-hidden ring-2 ring-emerald-500/40 shadow-lg shadow-emerald-500/10">
 <img src="/logo-512.png" alt="AI Holdem Coach logo" class="w-full h-full object-cover" />
 </div>
-<p class="text-sm text-gray-500">AI Holdem Coach</p>
+<div class="text-center space-y-1">
+<p class="text-sm font-semibold text-gray-200">AI Holdem Coach</p>
+<p class="text-[11px] text-gray-600">Your pocket poker analyst</p>
+</div>
+<div class="splash-spinner"></div>
 </div>
 <header id="app-header" class="border-b border-neutral-800/80 bg-black/70 backdrop-blur-xl sticky top-0 z-10 flex-shrink-0">
 <div class="px-4 pt-3 pb-2 flex items-center justify-between">
