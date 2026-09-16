@@ -58,6 +58,7 @@ def groq_ask(messages, tools=None, tool_choice=None):
 	raise last_err
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+DISCORD_SUPPORT_WEBHOOK_URL = os.environ.get("DISCORD_SUPPORT_WEBHOOK_URL")
 USER_AGENT = "AIHoldemCoach (https://aiholdemcoach.com, v1.0)"
 
 CHAT_DAILY_LIMIT = int(os.environ.get("CHAT_DAILY_LIMIT", "300"))
@@ -1602,6 +1603,47 @@ async def usage_endpoint(req: Request):
         pass
     return {"tier": ent["tier"], "plan": ent["plan"], "limits": ent["limits"], "counts": counts, "trial_days": TRIAL_DAYS, "trial": ent.get("trial") or {"active": False, "days_left": 0, "ended": False}}
 
+@app.post("/api/support")
+async def support_ticket(req: Request):
+    uid, email = auth_identity(req)
+    if not uid:
+        return {"error": "unauthorized"}
+    try:
+        body = await req.json()
+    except Exception:
+        return {"error": "bad request"}
+    topic = str(body.get("topic") or "other").strip()[:40]
+    message = str(body.get("message") or "").strip()
+    if not message or len(message) < 2 or len(message) > 4000:
+        return {"error": "Write a short message first."}
+    tier = "free"
+    try:
+        tier = entitlement(uid, email).get("tier", "free")
+    except Exception:
+        pass
+    try:
+        res = supabase.table("support_tickets").insert({"user_id": uid, "topic": topic, "message": message, "tier": tier, "email": email}).execute()
+        tid = res.data[0].get("id") if (res.data and res.data[0]) else None
+    except Exception as exc:
+        discord_ping(f"support insert: {exc}")
+        return {"error": "Could not save your ticket right now."}
+    webhook = os.environ.get("DISCORD_SUPPORT_WEBHOOK_URL", "")
+    if webhook:
+        topic_label = topic.replace("_", " ").title()
+        content = (f"**Support ticket #{tid}** · {topic_label}\n"
+                   f"User: {email or uid}\n"
+                   f"Tier: {tier}\n"
+                   f"```{message[:1500]}```")
+
+        def post():
+            try:
+                payload = urllib.request.Request(webhook, data=json.dumps({"content": content}).encode(), headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
+                urllib.request.urlopen(payload, timeout=10)
+            except Exception:
+                pass
+        threading.Thread(target=post, daemon=True).start()
+    return {"ok": True, "ticket": tid}
+
 @app.post("/api/stripe/checkout")
 async def stripe_checkout(req: Request):
     uid, email = auth_identity(req)
@@ -1690,6 +1732,14 @@ async def stripe_webhook(req: Request):
             plan = "premium" if price_id == STRIPE_PREMIUM_PRICE else ("pro" if price_id == STRIPE_PRO_PRICE else (obj.get("metadata") or {}).get("plan", "pro"))
             if uid:
                 upsert_subscription(uid, plan, status, period_end, sub_id, customer_id)
+                try:
+                    cd = obj.get("customer_details") or {}
+                    cu_email = cd.get("email") or (obj.get("metadata") or {}).get("email") or ""
+                    amt = obj.get("amount_total")
+                    amt_str = f"${amt/100:,.2f} " if amt else ""
+                    discord_ping(f"New subscriber - {plan.upper()} | {cu_email or 'no email'} | {amt_str}")
+                except Exception:
+                    pass
         elif typ == "customer.subscription.updated":
             sub_id = obj.get("id") or ""
             uid = find_user_by_subscription(sub_id)
