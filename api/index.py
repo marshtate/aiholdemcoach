@@ -613,6 +613,128 @@ def recap_turn(user_input, user_id, session_id):
     except Exception as exc:
         discord_ping(f"recap_turn: {exc}")
         return "Could not recap that session.", None
+def build_performance_summary(user_id):
+	try:
+		sres = supabase.table("sessions").select("id, created_at, closed_at, profit, cashout, status, units, label").eq("user_id", user_id).eq("status", "closed").order("created_at", desc=True).limit(120).execute()
+	except Exception as exc:
+		discord_ping(f"perf sessions: {exc}")
+		sres = None
+	sessions = (sres.data or []) if sres else []
+	sid_list = [s["id"] for s in sessions]
+	buyin_map = {}
+	if sid_list:
+		try:
+			bres = supabase.table("buyins").select("session_id, amount").in_("session_id", sid_list).execute()
+			for r in (bres.data or []):
+				buyin_map[r["session_id"]] = round(buyin_map.get(r["session_id"], 0) + (r.get("amount") or 0), 2)
+		except Exception:
+			pass
+	for s in sessions:
+		s["buyins"] = buyin_map.get(s["id"], 0)
+	hand_counts = {}
+	all_hands = []
+	try:
+		hres = supabase.table("messages").select("session_id, hand, position, player_action, result, amount, tier").eq("user_id", user_id).execute()
+		for r in (hres.data or []):
+			if r.get("session_id") in (sid_list or []) and r.get("hand"):
+				hand_counts[r["session_id"]] = hand_counts.get(r["session_id"], 0) + 1
+			if r.get("hand"):
+				all_hands.append(r)
+	except Exception as exc:
+		discord_ping(f"perf hands: {exc}")
+	actions = {}
+	tiers = {}
+	positions = {}
+	for h in all_hands:
+		a = (h.get("player_action") or "").lower()
+		if a: actions[a] = actions.get(a, 0) + 1
+		t = (h.get("tier") or "").lower()
+		if t: tiers[t] = tiers.get(t, 0) + 1
+		p = h.get("position")
+		if p:
+			key = p.upper()
+			if key: positions[key] = positions.get(key, 0) + 1
+	dollar = [s for s in sessions if (s.get("units") or "dollars") == "dollars"]
+	def agg(rows):
+		if not rows:
+			return None
+		vals = [(r.get("profit") or 0) for r in rows]
+		total = round(sum(vals), 2)
+		wins = sum(1 for v in vals if v > 0)
+		bi = sum(r.get("buyins") or 0 for r in rows)
+		return {"n": len(rows), "total": total, "avg": round(total / len(rows), 2),
+		        "wr": round(wins / len(rows) * 100), "buyin": bi,
+		        "roi": round(total / bi * 100) if bi else None}
+	agg_all = agg(dollar)
+	with_hands = [s for s in dollar if hand_counts.get(s["id"], 0) > 0]
+	low_bucket = high_bucket = None
+	if len(with_hands) >= 4:
+		counts = sorted(hand_counts[s["id"]] for s in with_hands)
+		med = counts[len(counts) // 2]
+		low_a = agg([s for s in with_hands if hand_counts[s["id"]] <= med])
+		high_a = agg([s for s in with_hands if hand_counts[s["id"]] > med])
+		if low_a and high_a:
+			low_bucket = {"n": low_a["n"], "hands": "fewer", "avg": low_a["avg"], "total": low_a["total"], "wr": low_a["wr"]}
+			high_bucket = {"n": high_a["n"], "hands": "more", "avg": high_a["avg"], "total": high_a["total"], "wr": high_a["wr"]}
+	notable = [h for h in all_hands if h.get("amount") is not None]
+	notable.sort(key=lambda h: abs(h.get("amount") or 0), reverse=True)
+	notable = notable[:10]
+	lines = [f"Total closed sessions: {len(sessions)}"]
+	if agg_all:
+		lines.append(f"Overall (dollar sessions, n={agg_all['n']}): total profit {agg_all['total']:+.2f}, avg per session {agg_all['avg']:+.2f}, win rate {agg_all['wr']}%, ROI {agg_all['roi']}%")
+	if not sessions:
+		lines.append("The player has no completed sessions yet.")
+	ps_lines = []
+	for s in sessions[:40]:
+		unit = s.get("units") or "dollars"
+		p = s.get("profit") if s.get("profit") is not None else 0
+		label = (s.get("label") or "").strip()
+		d = (s.get("closed_at") or s.get("created_at") or "")[:10]
+		bits = [f"{d} {label}".strip(), f"buyin {s.get('buyins') or 0}", f"profit {p:+.2f}{'' if unit == 'dollars' else ' ' + unit}", f"hands {hand_counts.get(s['id'], 0)}"]
+		ps_lines.append("; ".join(bits))
+	if ps_lines:
+		lines.append("Per-session (most recent first): " + " || ".join(ps_lines))
+	if low_bucket:
+		lines.append(f"Volume split: sessions with FEWER hands (<=median, n={low_bucket['n']}): avg profit {low_bucket['avg']:+.2f}, win rate {low_bucket['wr']}%. Sessions with MORE hands (n={high_bucket['n']}): avg profit {high_bucket['avg']:+.2f}, win rate {high_bucket['wr']}%.")
+	if actions:
+		atxt = ", ".join(f"{k} {v}" for k, v in sorted(actions.items(), key=lambda x: -x[1]))
+		lines.append(f"Action mix across logged hands: {atxt}.")
+	if tiers:
+		ttxt = ", ".join(f"{k} {v}" for k, v in sorted(tiers.items(), key=lambda x: -x[1]))
+		lines.append(f"Hand tier mix: {ttxt}.")
+	if positions:
+		ptxt = ", ".join(f"{k} {v}" for k, v in sorted(positions.items(), key=lambda x: -x[1]))
+		lines.append(f"Position frequency: {ptxt}.")
+	if notable:
+		nl = []
+		for h in notable[:8]:
+			parts = [h.get("hand") or "?", h.get("position") or "", h.get("player_action") or "", "won" if str(h.get("result") or "").lower() in ("won", "win", "w") else ("lost" if h.get("result") else ""), f"{h.get('amount')}"]
+			nl.append(" ".join(x for x in parts if x))
+		lines.append("Biggest hands by amount: " + "; ".join(nl))
+	if len(sessions) == 0 and len(all_hands) == 0:
+		lines.append("No tracked data at all yet.")
+	return "\n".join(lines)
+
+def performance_insight_turn(user_input, user_id, history=None):
+	summary = build_performance_summary(user_id)
+	system = ("You are a poker performance analyst. Below is the player's ACTUAL tracked data from their own app: aggregate stats, "
+	          "per-session results, hand counts, action/tier mix, and their biggest hands. Analyze that data and answer their question. "
+	          "Ground every claim in the data given - NEVER invent numbers, hands, sessions, or patterns. "
+	          "If it's the first question (no prior conversation), give an honest overall verdict plus 2 concrete themes from their data. "
+	          "When asked about session length vs profitability, use the provided volume split averages. "
+	          "Keep answers to 2-4 short sentences unless you're walking through a theme, then be concrete and specific with their numbers. "
+	          "Talk like a trusted poker friend. Do not ask the user for more data - you have everything.\n\n"
+	          f"PLAYER DATA\n{summary}")
+	msgs = [{"role": "system", "content": system}]
+	if history:
+		msgs.extend([{"role": h.get("role") if h.get("role") in ("user", "assistant") else "user", "content": h.get("content", "")} for h in history[-16:]])
+	msgs.append({"role": "user", "content": user_input})
+	try:
+		resp = groq_ask(msgs)
+		return resp.choices[0].message.content or "Could not analyze that right now."
+	except Exception as e:
+		return f"AI error: {str(e)}"
+
 @app.post("/api/chat")
 async def chat_endpoint(req: Request):
     if not startup_ok:
@@ -647,6 +769,16 @@ async def chat_endpoint(req: Request):
             return {"reply": limit_msg, "parsed": {}, "quota": "recap", "bullets": ["Where you bled the most chips", "Spots you over-called or over-folded", "Win rate by position", "Your 3 biggest missed opportunities"]}
         reply, rid = recap_turn(user_input, user_id, body.get("session_id"))
         return {"reply": reply, "parsed": {}, "recap_session_id": rid}
+    if mode == "review":
+        if not user_id:
+            return {"reply": "Sign in to review your performance."}
+        if not (ent.get("limits") or {}).get("recap"):
+            return {"reply": "Performance review is a Pro feature. Upgrade to unlock it and get a full analysis of your saved sessions, themes, and leaks.", "parsed": {}, "paywall": "review"}
+        limit_msg = check_chat_quota(user_email, user_id, "recap", ent)
+        if limit_msg:
+            return {"reply": limit_msg, "parsed": {}, "quota": "review", "bullets": ["Are you more profitable with fewer or more hands per night", "Biggest wins and worst leaks by the numbers", "Where your value leaks: sizing, calls, folds, positions", "Session trends and tilt patterns"]}
+        reply = performance_insight_turn(user_input, user_id, body.get("history"))
+        return {"reply": reply, "parsed": {}}
     limit_msg = check_chat_quota(user_email, user_id, mode if mode in ("coach", "track", "session") else "chat", ent)
     if limit_msg:
         return {"reply": limit_msg, "parsed": {}, "quota": mode if mode in ("coach", "track", "session") else "chat"}
