@@ -178,8 +178,10 @@ function togglePasteForm() { const f = document.getElementById('paste-form'); if
 function onPasteSourceChange() { const s = document.getElementById('paste-source'); const u = document.getElementById('paste-units'); if (s && u && s.value === 'offsuit') u.value = 'chips'; }
 async function submitPasteImport() {
 const el = document.getElementById('paste-status');
+const btn = document.getElementById('paste-submit');
 const text = (document.getElementById('paste-text').value || '').trim();
 if (!text) { el.textContent = 'Paste some hands first.'; return; }
+btn.disabled = true;
 el.textContent = 'Importing...';
 try {
 const res = await authedFetch('/api/import/hands', { method: 'POST', body: JSON.stringify({ text: text, source: document.getElementById('paste-source').value, units: document.getElementById('paste-units').value, label: (document.getElementById('paste-label').value || '').trim() }) });
@@ -192,6 +194,7 @@ document.getElementById('paste-text').value = '';
 el.textContent = (res && res.error) || 'Could not import right now.';
 }
 } catch (e) { el.textContent = 'Could not import right now.'; }
+finally { btn.disabled = false; }
 }
 async function openCheckout(plan) {
 if (plan === 'premium' || plan === 'pro') {
@@ -219,6 +222,7 @@ refreshUsage();
 }
 async function addPastSession() {
 const status = document.getElementById('import-status');
+const btn = document.getElementById('import-submit');
 status.textContent = '';
 const date = document.getElementById('import-date').value;
 if (!date) { status.textContent = 'Pick a date for the session.'; return; }
@@ -236,7 +240,9 @@ if (isNaN(cashout) || cashout < 0) { status.textContent = 'Enter a cash-out amou
 const units = document.getElementById('import-units').value;
 const label = document.getElementById('import-label').value.trim();
 const apply = document.getElementById('import-bankroll').checked;
+btn.disabled = true;
 status.textContent = 'Adding...';
+try {
 const res = await authedFetch('/api/import/session', { method: 'POST', body: JSON.stringify({ date: date, label: label, buyins: buyins, cashout: cashout, profit: use_profit ? profit : null, use_profit: use_profit, units: units, apply_bankroll: apply }) });
 if (!res || res.error) {
 if (res && res.paywall) { status.textContent = res.error || 'This is a Pro feature.'; showPlanModal(); return; }
@@ -247,6 +253,8 @@ document.getElementById('import-label').value = '';
 document.getElementById('import-buyin').value = '';
 if (use_profit) document.getElementById('import-profit').value = '';
 else document.getElementById('import-cashout').value = '';
+} catch (e) { status.textContent = 'Could not reach the server.'; }
+finally { btn.disabled = false; }
 }
 function applyTheme() {
 document.documentElement.setAttribute('data-theme', currentTheme);
