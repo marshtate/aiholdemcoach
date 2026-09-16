@@ -57,7 +57,7 @@ def groq_ask(messages, tools=None, tool_choice=None):
 				break
 	raise last_err
 
-GROQ_VISION_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview", "meta-llama/llama-4-scout-17b-16e-instruct"]
+GROQ_VISION_MODELS = ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "meta-llama/llama-4-scout-17b-16e-instruct", "llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview"]
 
 def groq_vision_text(image_b64, prompt, mime="image/jpeg"):
 	models = []
