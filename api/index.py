@@ -101,7 +101,7 @@ def check_chat_quota(user_email, user_id, mode="chat", ent=None):
 			"p_day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
 			"p_user": u,
 			"p_global": USAGE_SENTINEL_GLOBAL,
-			"p_mode": "chat" if mode not in ("coach", "track", "recap") else mode,
+			"p_mode": "track" if mode == "session" else ("chat" if mode not in ("coach", "track", "recap") else mode),
 		}).execute()
 	except Exception as exc:
 		if not _usage_gate_warned:
@@ -122,7 +122,7 @@ def check_chat_quota(user_email, user_id, mode="chat", ent=None):
 	if mode == "coach" and limits.get("coach"):
 		if (row.get("u_coach") or 0) > limits["coach"]:
 			return f"You've used your {limits['coach']} daily coach chats on the Free plan. Upgrade to Pro for unlimited coaching, recap, and import."
-	if mode == "track" and limits.get("track"):
+	if mode in ("track", "session") and limits.get("track"):
 		if (row.get("u_track") or 0) > limits["track"]:
 			return f"You've used your {limits['track']} daily tracked hands on the Free plan. Upgrade to Pro for unlimited tracking."
 	return None
@@ -399,8 +399,10 @@ coach_system = "You are a poker coach. When a player describes their hand WITH a
 
 track_system = "You are a poker hand tracker. From the player's message, extract their hand, position, what they did, whether they won or lost, and how much - call log_hand with everything you find. If the message contains MORE THAN ONE hand (e.g. 'won with AKo, then lost with 77'), put EVERY hand into the hands array of a SINGLE log_hand call - one object per hand - and never skip any. Never drop a result or amount the player mentions. If they buy in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they tell you their total for the night - profit or loss - call close_session with profit, positive for profit, negative for loss. If they tell you they cashed out or walked away with an amount, call close_session with cashout. If they say they're done - 'done', 'end session', 'that's it', 'I'm out' - do NOT close the session yet. Instead, ask them to confirm their total buy-in and total cash-out. Once they give you both numbers, call record_buyin with their total buy-in, then call close_session with cashout. If they say they're done with no numbers at all, close with cashout 0. Respond ONLY with the confirmation, e.g. 'Bought in for $5.' or 'Session closed - [+/-profit].' or 'Logged - AKo, won, $20. Logged - 77, lost, $10.' Never give advice. Never judge a hand's quality. If the player's message names NO hole cards at all (e.g. just 'lost 35', 'won the pot', 'flop came 8 7 2'), leave the hand field OUT of log_hand - the system attaches their most recent hand itself. Only respond 'What hand were you holding?' when the player gives no cards and there is no previous hand to attach. If they say they're done AND give a profit or cash-out figure now, call close_session immediately with those figures - never reply with conversation or advice instead of closing, and if the buy-in was already recorded earlier in this conversation, use it - do not ask them to confirm buy-in again."
 
+session_system = "You are a poker session logger. This player only wants their session results tracked - buy-ins and the final number - NOT individual hands or cards. Ignore any mention of specific hands, cards, positions, or actions and never ask about them. If they mention a buy-in or rebuy - 'bought in', 'buy-in', 'rebuy', 'loaded up', with an amount - call record_buyin with that amount. If they say they're done or give their result - 'done', 'end of session', 'cashed out X', 'walked away with X', 'won X', 'up X', 'lost X', 'down X' - call close_session with the figure: cashout for an amount they walked away with, profit otherwise (positive for profit, negative for loss). If they say done without any figure, ask once for their total buy-in and total cash-out, then call record_buyin with the total buy-in and close_session with cashout. Never call log_hand. Respond ONLY with short confirmations, e.g. 'Bought in for $5.' or 'Session closed: +$30.' Never give advice."
+
 def build_system(mode, session=None):
-	base = track_system if mode == "track" else coach_system
+	base = session_system if mode == "session" else (track_system if mode == "track" else coach_system)
 	if session and session.get("hand") and mode == "coach":
 		hand = session["hand"]
 		pos = session.get("position", "")
@@ -492,7 +494,7 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
                     if not parsed.get("hand") and ctx_hand:
                         parsed["hand"] = ctx_hand
                     logged_hands.append(parsed)
-            if tc.function.name == "record_buyin" and mode == "track":
+            if tc.function.name == "record_buyin" and mode in ("track", "session"):
                 try:
                     sid = get_or_create_session(user_id, units)
                     if sid and args.get("amount") is not None:
@@ -501,7 +503,7 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
                     discord_ping(f"record_buyin insert: {exc}")
             if tc.function.name == "close_session":
                 closed = True
-        if mode == "track":
+        if mode in ("track", "session"):
             if closed and user_id:
                 try:
                     sid = get_or_create_session(user_id, units)
@@ -645,9 +647,9 @@ async def chat_endpoint(req: Request):
             return {"reply": limit_msg, "parsed": {}, "quota": "recap", "bullets": ["Where you bled the most chips", "Spots you over-called or over-folded", "Win rate by position", "Your 3 biggest missed opportunities"]}
         reply, rid = recap_turn(user_input, user_id, body.get("session_id"))
         return {"reply": reply, "parsed": {}, "recap_session_id": rid}
-    limit_msg = check_chat_quota(user_email, user_id, mode if mode in ("coach", "track") else "chat", ent)
+    limit_msg = check_chat_quota(user_email, user_id, mode if mode in ("coach", "track", "session") else "chat", ent)
     if limit_msg:
-        return {"reply": limit_msg, "parsed": {}, "quota": mode if mode in ("coach", "track") else "chat"}
+        return {"reply": limit_msg, "parsed": {}, "quota": mode if mode in ("coach", "track", "session") else "chat"}
     reply, parsed, session, tool_called, closed, logged_hands = run_pipeline(user_input, mode, user_id, body.get("units", "dollars"))
     if user_id and tool_called and not closed and not parsed.get("buyin"):
         batch = logged_hands if logged_hands else [parsed]
