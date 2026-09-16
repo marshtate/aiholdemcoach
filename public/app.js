@@ -1465,6 +1465,130 @@ html += '</div>';
 return html;
 }
 let mySocial = null;
+function escH(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function toggleGameForm() { const f = document.getElementById('game-form'); if (f) f.classList.toggle('hidden'); }
+async function createGame() {
+const btn = document.getElementById('game-create-btn');
+const status = document.getElementById('game-status');
+if (!btn || !status) return;
+const invites = Array.from(document.querySelectorAll('#game-invite-list input:checked')).map(i => i.value);
+btn.disabled = true;
+status.textContent = 'Creating...';
+try {
+const res = await authedFetch('/api/games', { method: 'POST', body: JSON.stringify({ name: document.getElementById('game-name').value.trim(), happened_at: document.getElementById('game-date').value, invites: invites }) });
+if (res && res.error) { status.textContent = res.error; btn.disabled = false; return; }
+toggleGameForm();
+document.getElementById('game-name').value = '';
+document.getElementById('game-date').value = '';
+status.textContent = '';
+loadGames();
+} catch (e) { status.textContent = 'Could not create right now.'; }
+finally { btn.disabled = false; }
+}
+function gameCard(g) {
+const dateStr = g.happened_at || new Date(g.created_at).toLocaleDateString();
+const isHost = g.host.user_id === g.you;
+const name = escH(g.name || 'Game night');
+let h = `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<div class="flex items-center justify-between gap-2">
+<h3 class="text-sm font-semibold text-gray-200 truncate">${name}</h3>
+<span class="text-xs text-gray-500 flex-shrink-0">${dateStr}</span>
+</div>
+<div class="text-xs text-gray-500">host: <span class="text-gray-300">${g.host.username}</span></div>
+<div class="space-y-1.5 pt-1">`;
+for (const p of g.players) {
+const tag = p.you ? ' <span class="text-emerald-400 text-xs">(you)</span>' : '';
+if (p.status === 'pending') {
+h += `<div class="flex items-center justify-between gap-2 text-sm">
+<span class="text-gray-300 truncate">${escH(p.username)}${tag}<span class="text-xs text-gray-600 ml-1">invited</span></span>`;
+if (p.you) h += `<span class="flex gap-2 flex-shrink-0"><button onclick="gameAction('${g.id}','join')" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1 rounded-lg transition">Join</button><button onclick="gameAction('${g.id}','decline')" class="text-gray-500 text-xs px-2 py-1">Decline</button></span>`;
+else if (isHost) h += `<button onclick="gameAction('${g.id}','remove','${p.user_id}')" class="text-xs text-gray-500 hover:text-red-400 flex-shrink-0">remove</button>`;
+h += `</div>`;
+} else if (p.status === 'accepted') {
+if (p.profit !== null) {
+h += `<div class="flex items-center justify-between gap-2 text-sm">
+<span class="text-gray-200 truncate"><span class="font-semibold text-gray-400">${p.rank != null ? p.rank + '.' : ''}</span> ${escH(p.username)}${tag}</span>
+<span class="font-mono font-semibold flex-shrink-0 ${p.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${p.profit >= 0 ? '+' : ''}$${p.profit.toFixed(2)}</span>
+</div>`;
+} else {
+const canAdd = (p.you || isHost);
+h += `<div class="flex items-center justify-between gap-2 text-sm">
+<span class="text-gray-400 truncate">${escH(p.username)}${tag}</span>
+<span class="text-xs text-gray-600 flex-shrink-0">${p.you ? 'waiting for you' : 'waiting'}</span>
+${canAdd ? `<button onclick="enterGameResult('${g.id}','${p.user_id}')" class="bg-neutral-700 hover:bg-neutral-600 text-white text-xs font-semibold px-3 py-1 rounded-lg transition flex-shrink-0">add result</button>` : ''}
+</div>`;
+}
+} else {
+h += `<div class="flex items-center justify-between text-sm"><span class="text-gray-500 truncate">${escH(p.username)}</span><span class="text-xs text-gray-600 flex-shrink-0">declined</span></div>`;
+}
+}
+if (isHost && g.status === 'open') {
+h += `<div class="flex gap-2 pt-1">
+<button onclick="invitePlayer('${g.id}')" class="flex-1 bg-neutral-700 hover:bg-neutral-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">Invite friend</button>
+<button onclick="gameAction('${g.id}','close')" class="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition">Close the night</button>
+</div>`;
+}
+return h + '</div></div>';
+}
+async function loadGames() {
+const holder = document.getElementById('games-holder');
+if (!holder) return;
+const data = await authedFetch('/api/games');
+if (!data || data.error) { holder.innerHTML = '<p class="text-xs text-red-400 py-2">' + ((data && data.error) || 'Could not load.') + '</p>'; return; }
+const games = data.games || [];
+if (games.length === 0) { holder.innerHTML = ''; return; }
+const active = games.filter(g => g.status === 'open');
+const past = games.filter(g => g.status === 'closed');
+let h = active.map(gameCard).join('');
+if (past.length > 0) {
+h += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<h3 class="text-sm font-semibold text-gray-300">Past nights</h3>
+${past.slice(0, 5).map(g => `<div class="flex items-center justify-between text-xs py-0.5">
+<span class="text-gray-400 truncate">${escH(g.name || 'Game night')}</span>
+<span class="text-gray-600 flex-shrink-0">${g.happened_at || new Date(g.created_at).toLocaleDateString()}</span>
+</div>`).join('')}
+</div>`;
+}
+holder.innerHTML = h;
+}
+async function gameAction(gameId, action, userId) {
+const path = (action === 'join' || action === 'decline') ? 'join' : action;
+const body = (action === 'join' || action === 'decline') ? { action: action } : {};
+if ((action === 'remove' || action === 'close') && userId) body.user_id = userId;
+const res = await authedFetch('/api/games/' + gameId + '/' + path, { method: 'POST', body: JSON.stringify(body) });
+if (res && res.error) { alert(res.error); return; }
+loadGames();
+}
+async function invitePlayer(gameId) {
+const uname = prompt('Friend username to invite:');
+if (!uname) return;
+const res = await authedFetch('/api/games/' + gameId + '/invite', { method: 'POST', body: JSON.stringify({ username: uname.trim().toLowerCase() }) });
+if (res && res.error) { alert(res.error); return; }
+loadGames();
+}
+async function enterGameResult(gameId, userId) {
+const binStr = prompt('Buy-in total ($):', '5');
+if (binStr === null) return;
+const bin = parseFloat(binStr);
+if (isNaN(bin) || bin < 0) { alert('Enter a valid buy-in.'); return; }
+const outStr = prompt('Cash-out total ($) - or type a net like +20 or -15:', '');
+if (outStr === null) return;
+let payload;
+const t = outStr.trim();
+if (/^[+-]/.test(t)) {
+const p = parseFloat(t);
+if (isNaN(p)) { alert('Enter a valid result.'); return; }
+payload = { buyin: bin, profit: p };
+} else {
+const co = parseFloat(t);
+if (isNaN(co) || co < 0) { alert('Enter a valid cash-out.'); return; }
+payload = { buyin: bin, cashout: co };
+}
+payload.user_id = userId;
+const res = await authedFetch('/api/games/' + gameId + '/result', { method: 'POST', body: JSON.stringify(payload) });
+if (res && res.error) { alert(res.error); return; }
+loadGames();
+}
 async function loadSocial() {
 const el = document.getElementById('social-view');
 viewSkeleton('social-view', ['h-28', 'h-24', 'h-16']);
@@ -1472,6 +1596,33 @@ const data = await authedFetch('/api/friends');
 if (!data || data.error) { el.innerHTML = '<p class="text-sm text-red-400 text-center py-8">' + ((data && data.error) || 'Could not load.') + '</p>'; return; }
 mySocial = data;
 let html = '';
+const friendChecks = (data.friends || []).length > 0
+? data.friends.map(u => `<label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" value="${u.username}" class="accent-emerald-500">${u.username}</label>`).join('')
+: '<p class="text-xs text-gray-600">No friends yet - add one above to invite them.</p>';
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
+<div class="flex items-center justify-between">
+<h3 class="text-sm font-semibold text-gray-300">Game nights</h3>
+<button onclick="toggleGameForm()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition">New game</button>
+</div>
+<p class="text-xs text-gray-500">Start a table for tonight - friends join, everyone logs their result, and the night ranks the whole table.</p>
+<div id="game-form" class="hidden space-y-3 pt-2">
+<div>
+<p class="text-xs text-gray-400 mb-1">Name (optional)</p>
+<input id="game-name" type="text" placeholder="e.g. Friday 1/2 at my place" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500 placeholder-gray-600">
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Date (optional)</p>
+<input id="game-date" type="date" class="w-full bg-black text-gray-200 text-sm rounded-lg px-3 py-2.5 border border-neutral-800 outline-none focus:ring-2 focus:ring-emerald-500">
+</div>
+<div>
+<p class="text-xs text-gray-400 mb-1">Invite friends</p>
+<div id="game-invite-list" class="space-y-1.5">${friendChecks}</div>
+</div>
+<button id="game-create-btn" onclick="createGame()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2.5 rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">Create game night</button>
+<p id="game-status" class="text-xs text-gray-400"></p>
+</div>
+</div>`;
+html += `<div id="games-holder"></div>`;
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <div class="flex items-center justify-between">
 <h3 class="text-sm font-semibold text-gray-300">You</h3>
@@ -1528,6 +1679,7 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
 </div>
 </div>`;
 el.innerHTML = html;
+loadGames();
 loadLeaderboard();
 loadDiscordStatus();
 loadDiscordServer();
