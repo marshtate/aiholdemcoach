@@ -2467,7 +2467,7 @@ async def games_result_endpoint(req: Request, game_id: str):
         return {"error": "Enter a cash-out or a net profit."}
     try:
         supabase.table("game_players").update({
-            "buyin": buyin, "cashout": cashout if profit is not None and body.get("profit") is None else cashout,
+            "buyin": buyin, "cashout": cashout,
             "profit": profit, "updated_at": datetime.now(timezone.utc).isoformat()
         }).eq("game_id", game_id).eq("user_id", target).execute()
     except Exception as exc:
