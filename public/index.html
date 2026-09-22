@@ -135,6 +135,7 @@ Session
 <label for="password" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Password</label>
 <input id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" class="w-full bg-[#1a1a1a] text-gray-100 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800" />
 <button type="button" id="forgot-btn" class="text-xs text-gray-500 hover:text-emerald-400 transition">Forgot password?</button>
+<button type="button" id="resend-btn" class="hidden text-xs text-gray-500 hover:text-emerald-400 transition">Didn't get a confirmation email? Resend</button>
 </div>
 <div class="flex items-start gap-2 pt-0.5">
 <input id="agree-terms" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-600 flex-shrink-0">
@@ -153,6 +154,15 @@ Session
 </div>
 <button id="send-reset-btn" type="button" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-3 rounded-lg transition shadow-md shadow-emerald-900/40">Send reset link</button>
 <button id="forgot-back" type="button" class="w-full bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-white text-sm font-semibold py-3 rounded-lg transition">Back to sign in</button>
+</div>
+<div id="resend-form" class="hidden space-y-3">
+<p class="text-sm text-gray-400">Enter the email you signed up with and we'll send you a fresh confirmation link.</p>
+<div class="space-y-1.5">
+<label for="resend-email" class="text-xs font-medium text-gray-400 uppercase tracking-wider">Email</label>
+<input id="resend-email" type="email" placeholder="you@example.com" inputmode="email" class="w-full bg-[#1a1a1a] text-gray-100 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500 border border-neutral-800" />
+</div>
+<button id="send-resend-btn" type="button" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold py-3 rounded-lg transition shadow-md shadow-emerald-900/40">Resend confirmation email</button>
+<button id="resend-back" type="button" class="w-full bg-[#1a1a1a] hover:bg-neutral-800 border border-neutral-800 text-white text-sm font-semibold py-3 rounded-lg transition">Back to sign in</button>
 </div>
 <div id="reset-panel" class="hidden space-y-3">
 <p class="text-sm text-gray-400">Choose a new password for your account.</p>
