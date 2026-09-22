@@ -444,7 +444,11 @@ const agree = document.getElementById('agree-terms');
 if (!agree || !agree.checked) { showError('Please tick the box to confirm you\'re 18+ and agree to the Terms & Privacy Policy.'); return; }
 const { data, error } = await sb.auth.signUp({ email, password });
 if (error) { showError(error.message); return; }
-if (data.session) showApp(); else showError('Account created. Check email to confirm.');
+if (data.session) showApp();
+else {
+document.getElementById('resend-btn').classList.remove('hidden');
+showNotice('Account created — check your email to confirm. Didn\'t get it? Resend below.');
+}
 });
 document.getElementById('auth-form').addEventListener('submit', async (ev) => {
 ev.preventDefault();
@@ -460,12 +464,29 @@ if (!identifier.includes('@')) {
     identifier = d.email;
 }
 const { data, error } = await sb.auth.signInWithPassword({ email: identifier, password });
-if (error) { showError(error.message); return; }
+if (error) { showError(error.message); if (/confirm/i.test(error.message)) document.getElementById('resend-btn').classList.remove('hidden'); return; }
 showApp();
 });
 document.getElementById('forgot-btn').addEventListener('click', () => {
 document.getElementById('auth-form').classList.add('hidden');
 document.getElementById('forgot-form').classList.remove('hidden');
+});
+document.getElementById('resend-btn').addEventListener('click', () => {
+document.getElementById('auth-form').classList.add('hidden');
+document.getElementById('resend-form').classList.remove('hidden');
+});
+document.getElementById('resend-back').addEventListener('click', () => {
+document.getElementById('auth-form').classList.remove('hidden');
+document.getElementById('resend-form').classList.add('hidden');
+});
+document.getElementById('send-resend-btn').addEventListener('click', async () => {
+const email = document.getElementById('resend-email').value.trim();
+if (!email || !email.includes('@')) { showError('Enter your email.'); return; }
+const { error } = await sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: window.location.origin } });
+if (error) { showError(error.message); return; }
+document.getElementById('resend-form').classList.add('hidden');
+document.getElementById('auth-form').classList.remove('hidden');
+showNotice('Confirmation email sent. Check your inbox.');
 });
 document.getElementById('forgot-back').addEventListener('click', () => {
 document.getElementById('auth-form').classList.remove('hidden');
