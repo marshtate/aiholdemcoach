@@ -1251,25 +1251,18 @@ return;
 }
 
 const tiers = {}, hands = {}, actions = {};
-let folds = 0;
 entries.forEach(e => {
 if (e.tier) { const k = e.tier.toLowerCase(); tiers[k] = (tiers[k] || 0) + 1; }
 if (e.hand) { hands[e.hand] = (hands[e.hand] || 0) + 1; }
-if (e.player_action) { const a = e.player_action.toLowerCase(); actions[a] = (actions[a] || 0) + 1; if (a === 'fold') folds++; }
+if (e.player_action) { const a = e.player_action.toLowerCase(); actions[a] = (actions[a] || 0) + 1; }
 });
 
-const foldPct = entries.length > 0? Math.round((folds / entries.length) * 100): 0;
 const closed = sessions.filter(s => s.status === 'closed' && s.profit!== null);
 const moneyClosed = closed.filter(dollarSession);
 const open = sessions.find(s => s.status === 'open');
-const totalProfit = moneyClosed.reduce((sum, s) => sum + (s.profit || 0), 0);
-const wins = closed.filter(s => s.profit > 0).length;
-const winRate = closed.length > 0? Math.round((wins / closed.length) * 100): null;
-const profitStr = totalProfit >= 0? '+$' + totalProfit.toFixed(2): '-$' + Math.abs(totalProfit).toFixed(2);
-const avgProfit = closed.length > 0? (totalProfit / closed.length): 0;
-const avgStr = avgProfit >= 0? '+$' + avgProfit.toFixed(2): '-$' + Math.abs(avgProfit).toFixed(2);
 const totalBuyins = moneyClosed.reduce((sum, s) => sum + (s.buyins || 0), 0);
 const totalCashouts = moneyClosed.reduce((sum, s) => sum + (s.cashout || 0), 0);
+const totalProfit = moneyClosed.reduce((sum, s) => sum + (s.profit || 0), 0);
 const roi = totalBuyins > 0 ? (totalProfit / totalBuyins) * 100 : null;
 const roiStr = roi === null ? '-' : (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%';
 
@@ -1301,43 +1294,18 @@ ${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${fmtAmt(bin, open.u
 <p class="text-xs text-gray-500">Log hands. Say "done" when you're ready and confirm your buy-in and cash-out to close.</p>
 </div>`;
 }
-html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
-<h3 class="text-sm font-semibold text-gray-300">Overview</h3>
-<div class="grid grid-cols-2 gap-3">
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-emerald-400">${entries.length}</p><p class="text-xs text-gray-500">Hands</p></div>
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">${foldPct}%</p><p class="text-xs text-gray-500">Fold rate</p></div>
-</div>
-</div>`;
-
 if (closed.length > 0) {
+if (totalBuyins > 0) {
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
-<h3 class="text-sm font-semibold text-gray-300">Sessions</h3>
+<h3 class="text-sm font-semibold text-gray-300">Money</h3>
 <div class="grid grid-cols-2 gap-3">
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-emerald-400">${closed.length}</p><p class="text-xs text-gray-500">Played</p></div>
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${totalProfit >= 0? 'text-emerald-400': 'text-red-400'}">${profitStr}</p><p class="text-xs text-gray-500">Total profit</p></div>
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-amber-400">${winRate}%</p><p class="text-xs text-gray-500">Win rate</p></div>
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${avgProfit >= 0? 'text-emerald-400': 'text-red-400'}">${avgStr}</p><p class="text-xs text-gray-500">Avg per night</p></div>
-</div>${totalBuyins > 0 ? `<div class="grid grid-cols-2 gap-3">
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalBuyins.toFixed(2)}</p><p class="text-xs text-gray-500">Total buy-ins</p></div>
-<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalCashouts.toFixed(2)}</p><p class="text-xs text-gray-500">Total cashouts</p></div>
+<div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${totalCashouts.toFixed(2)}</p><p class="text-xs text-gray-500">Total cash-outs</p></div>
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold ${roi >= 0? 'text-emerald-400': 'text-red-400'}">${roiStr}</p><p class="text-xs text-gray-500">ROI</p></div>
 <div class="bg-black rounded-lg p-3 text-center"><p class="text-xl font-bold text-gray-300">$${(totalBuyins / moneyClosed.length).toFixed(2)}</p><p class="text-xs text-gray-500">Avg buy-in</p></div>
-</div>` : ''}
+</div>
 </div>`;
-const recent = closed.slice(0, 5).reverse();
-html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
-<h3 class="text-sm font-semibold text-gray-300">Recent nights</h3>
-${recent.map(s => {
-const d = new Date(s.closed_at || s.created_at).toLocaleDateString();
-const p = s.profit || 0;
-const label = s.label ? s.label + ' · ' : '';
-const nit = s.buyins ? `<span class="text-gray-500">${fmtAmt(s.buyins, s.units)} in</span> ` : '';
-return `<button onclick="openSession(${s.id}, 'stats-view')" class="w-full flex justify-between items-center text-xs text-left hover:bg-black/40 rounded-lg px-2 py-1 -mx-2 transition">
-<span class="text-gray-400">${label}${d}</span>
-<div class="flex items-center gap-2">${nit}<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${fmtSigned(p, s.units)}</span></div>
-</button>`;
-}).join('')}
-</div>`;
+}
 if (closed.length >= 2) {
 const chartSessions = closed.slice(0, 10).reverse();
 const maxAbs = Math.max(1, ...chartSessions.map(s => Math.abs(s.profit || 0)));
@@ -1353,9 +1321,21 @@ return `<div class="flex-1 flex flex-col items-center gap-0.5 h-full justify-end
 }).join('')}
 </div>
 </div>`;
-} else {
-html += `<div class="bg-[#1a1a1a] rounded-xl p-4"><p class="text-sm text-gray-500 text-center">Track a session and close it to see your nights.</p></div>`;
 }
+const recent = closed.slice(0, 5).reverse();
+html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
+<h3 class="text-sm font-semibold text-gray-300">Recent nights</h3>
+${recent.map(s => {
+const d = new Date(s.closed_at || s.created_at).toLocaleDateString();
+const p = s.profit || 0;
+const label = s.label ? s.label + ' · ' : '';
+const nit = s.buyins ? `<span class="text-gray-500">${fmtAmt(s.buyins, s.units)} in</span> ` : '';
+return `<button onclick="openSession(${s.id}, 'stats-view')" class="w-full flex justify-between items-center text-xs text-left hover:bg-black/40 rounded-lg px-2 py-1 -mx-2 transition">
+<span class="text-gray-400">${label}${d}</span>
+<div class="flex items-center gap-2">${nit}<span class="font-semibold ${p >= 0? 'text-emerald-400': 'text-red-400'}">${fmtSigned(p, s.units)}</span></div>
+</button>`;
+}).join('')}
+</div>`;
 }
 
 const topHands = Object.entries(hands).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -1757,51 +1737,37 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 </div>`;
 html += `<div id="discord-card" class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 <h3 class="text-sm font-semibold text-gray-300">Discord</h3>
-<p class="text-xs text-gray-500">Post your nights to the community server and tag yourself.</p>
-<div id="discord-status" class="text-xs text-gray-400">Loading...</div>
-</div>`;
-html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
-<h3 class="text-sm font-semibold text-gray-300">Discord server</h3>
-<p class="text-xs text-gray-500">Join the table, ask about hands, and share your nights.</p>
-<div id="discord-server-status" class="space-y-2">
+<p class="text-xs text-gray-500">Join the table, ask about hands, and post your nights to the community server.</p>
+<div id="discord-body" class="space-y-2">
 <p class="text-xs text-gray-400">Loading...</p>
 </div>
 </div>`;
 el.innerHTML = html;
 loadGames();
 loadLeaderboard();
-loadDiscordStatus();
-loadDiscordServer();
+loadDiscordCard();
 }
-async function loadDiscordServer() {
-const el = document.getElementById('discord-server-status');
+async function loadDiscordCard() {
+const el = document.getElementById('discord-body');
 if (!el) return;
-const data = await authedFetch('/api/discord/widget');
+const config = await authedFetch('/api/discord/config');
 const link = await authedFetch('/api/discord/link');
-if (!data) { el.innerHTML = '<p class="text-xs text-gray-500">Could not load the server widget.</p>'; return; }
+const data = await authedFetch('/api/discord/widget');
+if (!config || !config.enabled) { el.innerHTML = '<p class="text-xs text-gray-500">Discord sharing isn\'t configured by the owner yet.</p>'; return; }
 let html = '';
-const invite = data.invite || 'https://discord.gg/KB4rNwnea';
-if (data.ok) {
+if (data && data.ok) {
 html += `<p class="text-xs text-emerald-400"><span class="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5 pulse-green"></span>${data.presence_count} online now</p>`;
 }
 if (link && link.linked) {
+html += `<p class="text-xs text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>`;
 html += `<button onclick="shareTonight()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Share my latest night</button>`;
-}
-html += `<a href="${invite}" target="_blank" rel="noopener" class="inline-block bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Join Discord</a>`;
-if (!data.ok) html += '<p class="text-[10px] text-gray-600">Live presence hidden - widget not enabled in server settings.</p>';
-el.innerHTML = html;
-}
-async function loadDiscordStatus() {
-const statusEl = document.getElementById('discord-status');
-if (!statusEl) return;
-const config = await authedFetch('/api/discord/config');
-const link = await authedFetch('/api/discord/link');
-if (!config || !config.enabled) { statusEl.innerHTML = '<p class="text-gray-500">Discord sharing isn\'t configured by the owner yet.</p>'; return; }
-if (!link || !link.linked) {
-statusEl.innerHTML = `<button onclick="startDiscordLink()" class="bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Connect Discord</button>`;
 } else {
-statusEl.innerHTML = `<p class="text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>`;
+html += `<button onclick="startDiscordLink()" class="bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Connect Discord</button>`;
 }
+const invite = (data && data.invite) || 'https://discord.gg/KB4rNwnea';
+html += `<a href="${invite}" target="_blank" rel="noopener" class="inline-block bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Join Discord</a>`;
+if (data && !data.ok) html += '<p class="text-[10px] text-gray-600">Live presence hidden - widget not enabled in server settings.</p>';
+el.innerHTML = html;
 }
 async function startDiscordLink() {
 const config = await authedFetch('/api/discord/config');
@@ -1814,9 +1780,9 @@ window.location.href = 'https://discord.com/api/oauth2/authorize?client_id=' + c
 async function shareTonight() {
 const data = await authedFetch('/api/discord/share', { method: 'POST', body: JSON.stringify({ tz: new Date().getTimezoneOffset() }) });
 if (data && data.error) { alert(data.error); return; }
-const s = document.getElementById('discord-status');
+const s = document.getElementById('discord-body');
 if (s) s.innerHTML = '<p class="text-emerald-400">Posted! Check your Discord channel.</p>';
-setTimeout(() => { loadDiscordStatus(); loadDiscordServer(); }, 3000);
+setTimeout(() => { loadDiscordCard(); }, 3000);
 }
 async function handleDiscordCallback() {
 const params = new URLSearchParams(window.location.search);
