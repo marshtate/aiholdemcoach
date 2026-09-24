@@ -3,7 +3,9 @@ const supabaseKey = 'sb_publishable_sdYei5FXQLjoe8PKL062Mw_oACuTYYj';
 const sb = supabase.createClient(supabaseUrl, supabaseKey);
 const authScreen = document.getElementById('auth-screen');
 const appScreen = document.getElementById('app-screen');
-const logoutBtn = document.getElementById('logout-btn');
+const livePill = document.getElementById('live-pill');
+const liveDot = document.getElementById('live-dot');
+const liveLabel = document.getElementById('live-label');
 const sessionDot = document.getElementById('session-dot');
 const appHeader = document.getElementById('app-header');
 const modeToggle = document.getElementById('mode-toggle-header');
@@ -391,7 +393,9 @@ document.getElementById('bottom-nav').classList.remove('hidden');
 appHeader.classList.remove('hidden');
 authScreen.classList.add('hidden');
 appScreen.classList.remove('hidden');
-logoutBtn.classList.remove('hidden');
+livePill.style.display = 'flex';
+livePill.classList.remove('hidden');
+startLivePoll();
 settingsBtn.classList.remove('hidden');
 activeTab = tabHome;
 setHeaderTitle();
@@ -403,11 +407,11 @@ refreshUsage();
 }
 function showAuth() {
 hideSplash();
+stopLivePoll();
 document.getElementById('bottom-nav').classList.add('hidden');
 appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
 appScreen.classList.add('hidden');
-logoutBtn.classList.add('hidden');
 settingsBtn.classList.add('hidden');
 modeToggle.classList.add('hidden');
 modeToggle.classList.remove('flex');
@@ -502,11 +506,11 @@ document.getElementById('auth-form').classList.remove('hidden');
 showNotice('Reset link sent. Check your email.');
 });
 function showResetPanel() {
+stopLivePoll();
 document.getElementById('bottom-nav').classList.add('hidden');
 appHeader.classList.add('hidden');
 authScreen.classList.remove('hidden');
 appScreen.classList.add('hidden');
-logoutBtn.classList.add('hidden');
 settingsBtn.classList.add('hidden');
 modeToggle.classList.add('hidden');
 modeToggle.classList.remove('flex');
@@ -526,7 +530,32 @@ document.getElementById('reset-panel').classList.add('hidden');
 document.getElementById('auth-form').classList.remove('hidden');
 showNotice('Password updated. Sign in with your new password.');
 });
-logoutBtn.addEventListener('click', async () => { await sb.auth.signOut(); showAuth(); });
+let livePollTimer = null;
+async function signOutAccount() {
+closeSettings();
+try { await sb.auth.signOut(); } catch (e) {}
+showAuth();
+}
+async function refreshLivePill() {
+try {
+const r = await authedFetch('/api/discord/widget');
+if (!r || r.error) return;
+const n = (r.presence_count != null ? r.presence_count : 0);
+liveLabel.textContent = n > 0 ? String(n) + ' live' : 'community';
+liveDot.classList.toggle('bg-emerald-500', n > 0);
+liveDot.classList.toggle('bg-neutral-600', !(n > 0));
+} catch (e) {}
+}
+function startLivePoll() {
+stopLivePoll();
+refreshLivePill();
+livePollTimer = setInterval(refreshLivePill, 30000);
+}
+function stopLivePoll() {
+if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
+livePill.classList.add('hidden');
+livePill.style.display = '';
+}
 function onbLoaded() { return localStorage.getItem('onboarded'); }
 function showOnboarding() {
 if (onbLoaded()) return;
