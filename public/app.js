@@ -1350,7 +1350,7 @@ const topHands = Object.entries(hands).sort((a, b) => b[1] - a[1]).slice(0, 5);
 if (topHands.length > 0) {
 const maxH = topHands[0][1];
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
-<h3 class="text-sm font-semibold text-gray-300">Most studied</h3>
+<h3 class="text-sm font-semibold text-gray-300">Most frequent hands</h3>
 ${topHands.map(([h, c]) => `<div class="space-y-1"><div class="flex justify-between text-xs"><span class="text-emerald-400 font-bold">${h}</span><span class="text-gray-500">${c}</span></div><div class="w-full bg-black rounded-full"><div class="bar bg-emerald-500" style="width: ${Math.round((c / maxH) * 100)}%"></div></div></div>`).join('')}
 </div>`;
 }
