@@ -15,6 +15,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>.tab-active { color: #34d399; border-bottom: 2px solid #34d399; }.tab-inactive { color: #64748b; border-bottom: 2px solid transparent; }.tier-premium { background: #d4a017; }.tier-strong { background: #b8860b; }.tier-playable { background: #059669; }.tier-speculative { background: #047857; }.tier-trash { background: #404040; }.mode-active { background: linear-gradient(135deg, #059669, #047857); color: white; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.35); }.mode-inactive { background: transparent; color: #7c8591; }.mode-inactive:hover { color: #cbd5e1; }.mode-btn { transition: all 0.2s ease; }.bar { height: 6px; border-radius: 3px; transition: width 0.4s ease; }.pulse-green { animation: pgreen 2s infinite; }
 @keyframes pgreen { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+@keyframes breathe { 0%,100%{opacity:1; transform:scale(1); box-shadow:0 0 0 0 rgba(52,211,153,0.35)} 50%{opacity:0.7; transform:scale(0.9); box-shadow:0 0 0 6px rgba(52,211,153,0)} }
+.live-dot { animation:breathe 3.2s ease-in-out infinite; }
 #chatbox { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -80,7 +83,10 @@ html[data-theme="light"] .loading-skeleton { background: linear-gradient(100deg,
 <div id="session-dot" class="w-2.5 h-2.5 rounded-full bg-neutral-700 ring-4 ring-neutral-800/60 flex-shrink-0"></div>
 <h1 id="header-title" class="font-semibold text-base tracking-tight text-gray-100 truncate">AI Holdem Coach</h1>
 </div>
-<button id="logout-btn" class="hidden text-xs text-gray-400 hover:text-gray-200 px-3 py-1.5 rounded-full border border-neutral-800 hover:border-neutral-700 transition">Sign out</button>
+<a id="live-pill" href="https://discord.gg/KB4rNwnea" target="_blank" rel="noopener" class="hidden items-center gap-1.5 text-xs font-medium text-gray-300 px-3 py-1.5 rounded-full border border-neutral-800 hover:border-emerald-500/50 transition" aria-label="Live community">
+<span id="live-dot" class="live-dot w-2 h-2 rounded-full bg-neutral-600"></span>
+<span id="live-label">community</span>
+</a>
 <button id="settings-btn" class="hidden text-gray-400 hover:text-gray-200 p-1.5 rounded-full border border-neutral-800 hover:border-neutral-700 transition" aria-label="Settings">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M11.078 2.25c-.917 0-1.699.663-1.85 1.567L9.05 4.889c-.02.12-.115.26-.297.348a7.493 7.493 0 00-.986.57c-.166.115-.334.126-.45.083L6.3 5.508a1.875 1.875 0 00-2.282.819l-.922 1.597a1.875 1.875 0 00.432 2.385l.84.692c.095.078.17.229.154.43a7.598 7.598 0 000 1.139c.015.201-.059.352-.153.43l-.841.692a1.875 1.875 0 00-.432 2.385l.922 1.597a1.875 1.875 0 002.282.819l1.019-.382c.115-.043.283-.031.45.082.312.214.641.405.985.57.182.088.277.228.297.35l.178 1.07c.15.904.932 1.567 1.85 1.567h1.844c.916 0 1.699-.663 1.85-1.567l.178-1.07c.02-.121.115-.262.297-.349a7.486 7.486 0 00.985-.57c.167-.114.335-.125.45-.083l1.02.382a1.875 1.875 0 002.28-.819l.923-1.597a1.875 1.875 0 00-.432-2.385l-.84-.692c-.095-.078-.17-.229-.154-.43a7.56 7.56 0 000-1.14c-.016-.2.059-.352.153-.43l.841-.692a1.875 1.875 0 00.432-2.384l-.922-1.598a1.875 1.875 0 00-2.282-.819l-1.02.382c-.114.043-.282.03-.449-.083a7.46 7.46 0 00-.985-.57c-.182-.088-.277-.228-.297-.35l-.178-1.07c-.15-.904-.933-1.567-1.85-1.567h-1.844zM12 15.75a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5z" clip-rule="evenodd"/></svg>
 </button>
@@ -524,6 +530,7 @@ Send me any hand - your cards, the board, your position - and I'll give you a re
 </div>
 <p class="text-[10px] text-gray-600">Export downloads a copy of your hands, sessions, and stats. Deleting is permanent.</p>
 </div>
+<button onclick="signOutAccount()" class="w-full text-gray-300 hover:text-white text-xs font-semibold px-3 py-2 rounded-lg border border-neutral-800 hover:border-neutral-700 transition">Sign out</button>
 <div class="flex justify-center gap-4 text-xs pt-1">
 <a href="/privacy.html" class="text-gray-500 hover:text-emerald-400 transition">Privacy policy</a>
 <a href="/terms.html" class="text-gray-500 hover:text-emerald-400 transition">Terms of service</a>
