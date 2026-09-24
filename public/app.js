@@ -540,10 +540,17 @@ async function refreshLivePill() {
 try {
 const r = await authedFetch('/api/discord/widget');
 if (!r || r.error) return;
-const n = (r.presence_count != null ? r.presence_count : 0);
-liveLabel.textContent = n > 0 ? String(n) + ' live' : 'community';
-liveDot.classList.toggle('bg-emerald-500', n > 0);
-liveDot.classList.toggle('bg-neutral-600', !(n > 0));
+const n = (r.members != null ? r.members : (r.presence_count != null ? r.presence_count : 0));
+const onl = r.online || 0;
+if (n > 0) {
+liveLabel.textContent = n.toLocaleString() + ' in Discord';
+liveDot.classList.toggle('bg-emerald-500', onl > 0);
+liveDot.classList.toggle('bg-neutral-600', !(onl > 0));
+} else {
+liveLabel.textContent = 'community';
+liveDot.classList.add('bg-neutral-600');
+liveDot.classList.remove('bg-emerald-500');
+}
 } catch (e) {}
 }
 function startLivePoll() {
@@ -1756,7 +1763,11 @@ const data = await authedFetch('/api/discord/widget');
 if (!config || !config.enabled) { el.innerHTML = '<p class="text-xs text-gray-500">Discord sharing isn\'t configured by the owner yet.</p>'; return; }
 let html = '';
 if (data && data.ok) {
-html += `<p class="text-xs text-emerald-400"><span class="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5 pulse-green"></span>${data.presence_count} online now</p>`;
+const n = data.members || 0;
+if (n > 0) {
+html += `<p class="text-xs text-emerald-400"><span class="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5 pulse-green"></span>${n.toLocaleString()} players here</p>`;
+if (data.online > 0) html += `<p class="text-xs text-gray-400">${data.online} at the table right now</p>`;
+}
 }
 if (link && link.linked) {
 html += `<p class="text-xs text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>`;
@@ -1766,7 +1777,7 @@ html += `<button onclick="startDiscordLink()" class="bg-[#5865F2] hover:bg-[#475
 }
 const invite = (data && data.invite) || 'https://discord.gg/KB4rNwnea';
 html += `<a href="${invite}" target="_blank" rel="noopener" class="inline-block bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs font-semibold px-4 py-2 rounded-lg transition">Join Discord</a>`;
-if (data && !data.ok) html += '<p class="text-[10px] text-gray-600">Live presence hidden - widget not enabled in server settings.</p>';
+if (data && !data.ok) html += '<p class="text-[10px] text-gray-600">Server counts unavailable right now - the community is still firing up.</p>';
 el.innerHTML = html;
 }
 async function startDiscordLink() {
