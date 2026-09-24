@@ -946,6 +946,44 @@ ${bin > 0 ? `<span class="ml-auto text-xs text-emerald-400">${fmtAmt(bin, open.u
 </div>`;
 }
 
+if (closed.length > 0) {
+let streak = 0;
+const byDate = closed.slice().sort((a, b) => new Date(b.closed_at || b.created_at) - new Date(a.closed_at || a.created_at));
+for (const s of byDate) { if ((s.profit || 0) > 0) streak++; else break; }
+let bestNight = null;
+for (const s of closed) { if (!bestNight || (s.profit || 0) > (bestNight.profit || 0)) bestNight = s; }
+const bestDate = bestNight ? new Date(bestNight.closed_at || bestNight.created_at).toLocaleDateString() : null;
+const headline = totalProfit > 0 ? 'Up all-time — keep going.'
+  : totalProfit < 0 ? 'Down all-time — your best night says it\'s possible.'
+  : 'Even all-time — one good night gets you ahead.';
+html += `<div class="bg-gradient-to-b from-[#0d1f17] to-[#1a1a1a] border border-emerald-900/50 rounded-xl p-4 space-y-3 view-in">
+<div class="flex items-baseline justify-between">
+<h3 class="text-sm font-semibold text-emerald-300">Your run</h3>
+<span class="text-xs text-gray-500">all time</span>
+</div>
+<div class="flex items-end justify-between gap-3">
+<div class="min-w-0">
+<p class="text-3xl font-bold ${totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${profitStr}</p>
+<p class="text-xs text-gray-500 mt-1">${headline}</p>
+</div>
+<div class="text-right flex-shrink-0">
+<p class="text-2xl font-bold font-mono ${(bestNight && (bestNight.profit || 0) > 0) ? 'text-amber-400' : 'text-gray-400'}">${bestNight ? fmtSigned(bestNight.profit, bestNight.units) : '-'}</p>
+<p class="text-xs text-gray-500">best night${bestDate ? ' · ' + bestDate : ''}</p>
+</div>
+</div>
+<div class="flex gap-2 pt-1">
+<div class="flex-1 bg-black/40 rounded-lg p-2.5 text-center">
+<p class="text-lg font-bold ${winRate !== null && winRate >= 50 ? 'text-emerald-400' : 'text-gray-100'}">${winRate !== null ? winRate + '%' : '-'}</p>
+<p class="text-[10px] text-gray-500">Win rate</p>
+</div>
+<div class="flex-1 bg-black/40 rounded-lg p-2.5 text-center">
+<p class="text-lg font-bold ${streak >= 2 ? 'text-emerald-400' : 'text-gray-500'}">${streak >= 2 ? streak : '-'}</p>
+<p class="text-[10px] text-gray-500">Winning nights in a row</p>
+</div>
+</div>
+</div>`;
+}
+
 if (bankroll && typeof bankroll.amount === 'number') {
 const amt = bankroll.amount || 0;
 const goal = bankroll.goal;
@@ -1001,7 +1039,9 @@ html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-2">
 </div>
 </div>`;
 
-const recent = closed.slice(0, 5).reverse();
+html += await weeklyCardHtml();
+
+const recent = closed.slice().sort((a, b) => (b.profit || 0) - (a.profit || 0)).slice(0, 5);
 html += `<div class="bg-[#1a1a1a] rounded-xl p-4 space-y-3">
 <h3 class="text-sm font-semibold text-gray-300">Recent nights</h3>
 ${recent.map(s => {
@@ -1016,7 +1056,6 @@ return `<button onclick="openSession(${s.id}, 'home-view')" class="w-full flex j
 </div>`;
 }
 
-html += await weeklyCardHtml();
 el.innerHTML = html;
 }
 function sigMoney(x) {
