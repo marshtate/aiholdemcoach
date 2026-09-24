@@ -1619,15 +1619,35 @@ _widget_cache = {"at": 0.0, "data": None}
 async def discord_widget(req: Request):
     if time.time() - _widget_cache["at"] < 60 and _widget_cache["data"] is not None:
         return _widget_cache["data"]
+    members = 0
+    online = 0
+    name = ""
+    invite = None
+    try:
+        pv = urllib.request.Request(f"https://discord.com/api/guilds/{DISCORD_GUILD_ID}/preview?with_counts=true",
+                                   headers={"Authorization": f"Bot {DISCORD_BOT_TOKEN}", "User-Agent": USER_AGENT})
+        with urllib.request.urlopen(pv, timeout=10) as r:
+            data = json.loads(r.read().decode())
+        members = int(data.get("approximate_member_count") or 0)
+        online = int(data.get("approximate_presence_count") or 0)
+        name = data.get("name") or ""
+    except Exception:
+        pass
     try:
         wh = urllib.request.Request(f"https://discord.com/api/guilds/{DISCORD_GUILD_ID}/widget.json",
                                    headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(wh, timeout=10) as r:
-            data = json.loads(r.read().decode())
-        result = {"ok": True, "name": data.get("name") or "", "presence_count": data.get("presence_count") or 0,
-                  "invite": data.get("instant_invite") or DISCORD_FALLBACK_INVITE}
+            wdata = json.loads(r.read().decode())
+        invoke = wdata.get("instant_invite") or DISCORD_FALLBACK_INVITE
+        if members == 0:
+            members = int(wdata.get("presence_count") or 0)
+            online = members
+        if not name:
+            name = wdata.get("name") or ""
     except Exception:
-        result = {"ok": False, "invite": DISCORD_FALLBACK_INVITE}
+        pass
+    result = {"ok": members > 0, "name": name, "members": members, "online": online,
+              "presence_count": online, "invite": invite or DISCORD_FALLBACK_INVITE}
     _widget_cache["at"] = time.time()
     _widget_cache["data"] = result
     return result
