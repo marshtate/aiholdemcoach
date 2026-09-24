@@ -1094,6 +1094,31 @@ async def history_update(req: Request):
     if not updates:
         return {"error": "nothing to update"}
     try:
+        prev = supabase.table("messages").select("hand, position, player_action, result, amount, session_id").eq("id", rid).eq("user_id", uid).execute()
+    except Exception:
+        prev = None
+    if set(updates).intersection({"hand", "position", "player_action", "result", "amount"}):
+        merged = {"hand": None, "position": None, "player_action": None, "result": None, "amount": None}
+        if prev and prev.data:
+            prev_row = prev.data[0]
+            merged.update({k: prev_row.get(k) for k in merged})
+        merged.update(updates)
+        units = "dollars"
+        sid = prev.data[0].get("session_id") if prev and prev.data else None
+        if sid:
+            try:
+                s = supabase.table("sessions").select("units").eq("id", sid).execute()
+                if s.data and s.data[0].get("units"):
+                    units = s.data[0]["units"]
+            except Exception:
+                pass
+        parts = [merged.get("hand") or "?"]
+        if merged.get("position"): parts.append(merged["position"])
+        if merged.get("player_action"): parts.append(merged["player_action"])
+        if merged.get("result"): parts.append("won" if str(merged["result"]).lower() in ("won", "win", "w") else "lost")
+        if merged.get("amount") is not None: parts.append(fmt_amount(merged["amount"], units))
+        updates["reply"] = "Logged - " + ", ".join(parts) + "."
+    try:
         supabase.table("messages").update(updates).eq("id", rid).eq("user_id", uid).execute()
         return {"ok": True}
     except Exception as exc:
