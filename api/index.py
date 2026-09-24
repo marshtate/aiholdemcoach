@@ -516,12 +516,16 @@ def run_pipeline(user_input, mode, user_id=None, units="dollars"):
                     for h in hs:
                         if h.get("result") is not None:
                             h["result"] = "won" if str(h["result"]).lower() in ("won", "win", "w") else "lost"
+                        if str(h.get("action") or "").lower() == "fold":
+                            h["result"] = None
                         if not h.get("hand") and ctx_hand:
                             h["hand"] = ctx_hand
                         logged_hands.append(h)
                 elif parsed.get("hand") or ctx_hand:
                     if not parsed.get("hand") and ctx_hand:
                         parsed["hand"] = ctx_hand
+                    if str(parsed.get("action") or "").lower() == "fold":
+                        parsed["result"] = None
                     logged_hands.append(parsed)
             if tc.function.name == "record_buyin" and mode in ("track", "session"):
                 try:
@@ -903,10 +907,18 @@ async def chat_endpoint(req: Request):
                             row_hand = prev_hand
                     if not row_hand:
                         continue
+                    row_summary = reply
+                    if len(batch) > 1:
+                        ps = [row_hand or "?"]
+                        if bh.get("position"): ps.append(bh["position"])
+                        if bh.get("action"): ps.append(bh["action"])
+                        if bh.get("result"): ps.append("won" if str(bh["result"]).lower() in ("won", "win", "w") else "lost")
+                        if bh.get("amount") is not None: ps.append(fmt_amount(bh["amount"], units))
+                        row_summary = "Logged - " + ", ".join(ps) + "."
                     row = {
                         "user_id": user_id,
                         "input": user_input,
-                        "reply": reply,
+                        "reply": row_summary,
                         "hand": row_hand,
                         "position": bh.get("position"),
                         "player_action": bh.get("action"),
@@ -1103,6 +1115,9 @@ async def history_update(req: Request):
             prev_row = prev.data[0]
             merged.update({k: prev_row.get(k) for k in merged})
         merged.update(updates)
+        if str(merged.get("player_action") or "").lower() == "fold":
+            merged["result"] = None
+            updates["result"] = None
         units = "dollars"
         sid = prev.data[0].get("session_id") if prev and prev.data else None
         if sid:
