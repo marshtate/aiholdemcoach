@@ -6,6 +6,7 @@ const appScreen = document.getElementById('app-screen');
 const livePill = document.getElementById('live-pill');
 const liveDot = document.getElementById('live-dot');
 const liveLabel = document.getElementById('live-label');
+const DISCORD_MIN_VISIBLE_MEMBERS = 10;
 const sessionDot = document.getElementById('session-dot');
 const appHeader = document.getElementById('app-header');
 const modeToggle = document.getElementById('mode-toggle-header');
@@ -540,9 +541,9 @@ async function refreshLivePill() {
 try {
 const r = await authedFetch('/api/discord/widget');
 if (!r || r.error) return;
-const n = (r.members != null ? r.members : (r.presence_count != null ? r.presence_count : 0));
+const n = (r.members != null ? r.members : 0);
+if (n >= DISCORD_MIN_VISIBLE_MEMBERS) {
 const onl = r.online || 0;
-if (n > 0) {
 liveLabel.textContent = n.toLocaleString() + ' in Discord';
 liveDot.classList.toggle('bg-emerald-500', onl > 0);
 liveDot.classList.toggle('bg-neutral-600', !(onl > 0));
@@ -1762,12 +1763,10 @@ const link = await authedFetch('/api/discord/link');
 const data = await authedFetch('/api/discord/widget');
 if (!config || !config.enabled) { el.innerHTML = '<p class="text-xs text-gray-500">Discord sharing isn\'t configured by the owner yet.</p>'; return; }
 let html = '';
-if (data && data.ok) {
+if (data && data.ok && (data.members || 0) >= DISCORD_MIN_VISIBLE_MEMBERS) {
 const n = data.members || 0;
-if (n > 0) {
 html += `<p class="text-xs text-emerald-400"><span class="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1.5 pulse-green"></span>${n.toLocaleString()} players here</p>`;
 if (data.online > 0) html += `<p class="text-xs text-gray-400">${data.online} at the table right now</p>`;
-}
 }
 if (link && link.linked) {
 html += `<p class="text-xs text-gray-400">Connected as <span class="text-[#5865F2] font-semibold">@${link.username}</span></p>`;
